@@ -48,7 +48,9 @@ class ReviewFormPage(BasePage):
     
     # Guide review specific fields
     GUIDE_SELECT = "select[name='guide_id'], [data-testid='guide-select']"
-    GUIDE_NAME_INPUT = "input[name='guide_name'], input[placeholder*='Имя гида']"
+    GUIDE_NAME_INPUT = "input[placeholder*='Начните вводить имя гида']"
+    GUIDE_AUTOCOMPLETE = ".dropdown"
+    GUIDE_AUTOCOMPLETE_ITEM = ".dropdown-item"
     GUIDE_LANGUAGES_INPUT = "input[name='languages'], input[placeholder*='Языки']"
     GUIDE_SPECIALIZATION_INPUT = "input[name='specialization'], input[placeholder*='Специализация']"
     GUIDE_EXPERIENCE_RATING = "[data-testid='experience-rating']"
@@ -282,8 +284,48 @@ class ReviewFormPage(BasePage):
             name: Author name
             contact: Author contact (email or phone)
         """
-        await self.page.fill(self.AUTHOR_NAME_INPUT, name)
+        if name:  # Only fill if name is not empty
+            await self.page.fill(self.AUTHOR_NAME_INPUT, name)
         await self.page.fill(self.AUTHOR_CONTACT_INPUT, contact)
+    
+    async def fill_guide_name_with_autocomplete(self, search_text: str, select_exact: str = None) -> None:
+        """
+        Fill guide name using autocomplete dropdown.
+        Searches for guide and selects from dropdown.
+        
+        Args:
+            search_text: Text to type in the search field
+            select_exact: Exact name to select from dropdown (if None, selects first match)
+        """
+        # Clear and type search text
+        guide_input = self.page.locator(self.GUIDE_NAME_INPUT)
+        await guide_input.clear()
+        await guide_input.type(search_text, delay=100)
+        
+        # Wait for dropdown
+        await self.page.wait_for_selector(self.GUIDE_AUTOCOMPLETE, timeout=3000)
+        await self.page.wait_for_timeout(500)  # Let dropdown fully populate
+        
+        dropdown_items = self.page.locator(self.GUIDE_AUTOCOMPLETE_ITEM)
+        
+        # Select the appropriate item
+        found = False
+        for i in range(await dropdown_items.count()):
+            item_text = await dropdown_items.nth(i).text_content()
+            if select_exact:
+                # Select exact match
+                if item_text and select_exact in item_text:
+                    await dropdown_items.nth(i).click()
+                    found = True
+                    break
+            else:
+                # Select first item containing search text
+                if item_text and search_text in item_text:
+                    await dropdown_items.nth(i).click()
+                    found = True
+                    break
+        
+        assert found, f"No guide with '{select_exact or search_text}' found in autocomplete dropdown"
     
     async def fill_guide_review(self, data: Dict[str, Any]) -> None:
         """

@@ -159,7 +159,7 @@ def get_review_test_data() -> Dict[str, Any]:
         }
     ]
     
-    # Edge cases and boundary tests
+    # Edge cases.txt and boundary tests
     edge_cases = {
         "min_valid_title": "Отзыв",  # Minimum valid title
         "max_valid_title": "О" * 200,  # Maximum valid title

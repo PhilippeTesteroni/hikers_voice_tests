@@ -1,355 +1,220 @@
-# Hiker's Voice E2E Tests
+# Hiker's Voice - Система Автоматизированного Тестирования
 
-## Структура тестов
+## Философия проекта
+
+Минимум усложнения, максимум ясности. Тесты должны быть простыми, поддерживаемыми и запускаться локально перед пушем в прод. Никаких лишних абстракций и переусложнений.
+
+## Реализованные тесты
+
+### TEST-001: Создание отзыва на компанию с автокомплитом
+- Проверка создания отзыва на компанию
+- Использование автокомплита для выбора компании
+- Модерация через API
+- Проверка отображения на всех страницах
+
+### TEST-002: Создание отзыва на существующего гида
+- Создание анонимного отзыва на гида
+- Использование автокомплита для выбора гида
+- Математическая проверка пересчёта рейтинга
+- Учёт округления backend (толерантность 0.05)
+- Проверка отображения на трёх страницах: гида, главной и /reviews
+
+## Структура проекта
 
 ```
-tests/
+hikers_voice_tests/
 ├── conftest.py              # Главная конфигурация pytest
 ├── pytest.ini               # Настройки pytest
-├── requirements.txt         # Зависимости для тестов
-├── run_tests.py            # Скрипт для запуска тестов
+├── requirements.txt         # Зависимости проекта
 │
-├── e2e/                    # E2E тесты
-│   ├── conftest.py         # Конфигурация E2E тестов (Playwright)
-│   ├── pages/              # Page Objects
-│   │   ├── __init__.py
-│   │   ├── base_page.py   # Базовый класс страниц
-│   │   ├── home_page.py   # Главная страница
-│   │   └── review_form_page.py  # Формы отзывов
-│   ├── test_reviews.py    # TEST-001: Критический тест создания отзыва
-│   └── test_diagnostic_home.py  # Диагностический тест
+├── pages/                   # Page Objects паттерн
+│   ├── __init__.py         
+│   ├── base_page.py        # Базовый класс с общими методами
+│   ├── home_page.py        # Главная страница
+│   ├── review_form_page.py # Формы создания отзывов
+│   ├── guide_page.py       # Страница гида (NEW)
+│   └── reviews_page.py     # Страница всех отзывов (NEW)
 │
-├── fixtures/               # Тестовые данные и утилиты
+├── tests/                   # Тесты
+│   ├── conftest.py         # E2E конфигурация
+│   └── test_reviews.py     # Тесты отзывов (TEST-001, TEST-002)
+│
+├── fixtures/                # Тестовые данные
 │   ├── __init__.py
-│   ├── test_data.py       # Тестовые данные
-│   └── api_client.py      # API клиенты для тестов
+│   └── test_data.py        # Генераторы данных
 │
-├── screenshots/            # Скриншоты при ошибках (создаётся автоматически)
-├── reports/               # Отчёты о тестах (создаётся автоматически)
-└── logs/                  # Логи тестов (создаётся автоматически)
+└── utils/                   # Утилиты
+    ├── __init__.py
+    ├── test_helper.py      # API хелперы
+    └── rating_calculator.py # Калькулятор рейтингов (NEW)
 ```
 
-## Установка
+## Ключевые компоненты
 
-### 1. Установка зависимостей
+### Page Objects
 
-```bash
-cd /Users/philippkochnov/PycharmProjects/hikers
-pip install -r tests/requirements.txt
+#### GuidePage (новый)
+Работа со страницей гида `/guides/{id}`:
+- `open_guide_page(guide_id)` - открытие страницы гида
+- `get_guide_rating()` - получение среднего рейтинга
+- `get_reviews_count()` - подсчёт отзывов
+- `check_review_exists()` - проверка наличия отзыва
+- `check_review_rating()` - проверка звёзд (исправлено для подсчёта заполненных)
+
+#### ReviewsPage (новый)
+Работа со страницей всех отзывов `/reviews`:
+- `check_review_exists()` - поиск отзыва по автору/тексту
+- `find_review_by_author()` - поиск по автору (включая анонимов)
+- `search_reviews()` - поиск через поисковую строку
+
+#### ReviewFormPage (обновлён)
+Добавлены методы для работы с гидами:
+- `fill_guide_name_with_autocomplete()` - автокомплит для выбора гида
+- `fill_author_info()` - обработка пустого имени для анонимности
+
+### Утилиты
+
+#### RatingCalculator (новый)
+Математически точные расчёты рейтингов:
+```python
+# Формула backend:
+avg_rating = SUM(все рейтинги) / COUNT(отзывов)
+
+# Методы:
+calculate_new_rating()  # Расчёт нового рейтинга
+verify_rating_change()  # Проверка корректности с толерантностью
+get_expected_impact()   # Прогноз влияния отзыва
 ```
 
-### 2. Установка браузеров Playwright
+## Решённые проблемы
 
-```bash
-playwright install chromium
+### 1. Подсчёт звёзд в отзывах
+**Проблема:** Компонент Rating всегда рендерит 5 SVG элементов
+
+**Решение:** Считаем только заполненные звёзды с классом `text-yellow-400`:
+```python
+filled_stars = await review_element.locator("svg.text-yellow-400").count()
 ```
 
-Или используйте скрипт:
+### 2. Округление рейтингов
+**Проблема:** Backend округляет до 1 десятичного знака
 
-```bash
-python tests/run_tests.py install
+**Пример:**
+- Математически: (5.0 × 2 + 4) ÷ 3 = 4.666...
+- Backend возвращает: 4.7
+
+**Решение:** Толерантность 0.05 в проверках:
+```python
+verify_rating_change(..., tolerance=0.05)
 ```
 
-## Критические тесты
+### 3. Анонимные отзывы
+**Особенность:** Пустое имя автора сохраняется как "Аноним"
 
-### TEST-001: Создание отзыва на существующую компанию
-
-**Приоритет:** Критический
-
-**Что тестируется:**
-1. Клик на кнопку "Оставить отзыв" на главной
-2. Выбор типа "Отзыв о компании" в модальном окне
-3. Заполнение формы с автокомплитом компании
-4. Отправка и проверка редиректа
-5. Модерация через API
-6. Проверка отображения на главной
-
-```bash
-# Быстрый запуск TEST-001
-python run_test_001.py
-
-# С конкретным рейтингом (1-5)
-python run_test_001.py -r 5
-
-# Через pytest
-pytest tests/pages/test_reviews.py::test_create_company_review_with_autocomplete -v
+**Решение:** 
+```python
+# При поиске анонимного отзыва
+await test_helper.find_and_moderate_review(
+    author_name="Аноним",  # Не пустая строка
+    action="approve"
+)
 ```
+
+## Паттерны написания тестов
+
+### Структура теста (AAA)
+```python
+async def test_feature():
+    # Arrange - подготовка данных
+    review_data = {...}
+    
+    # Act - выполнение действий
+    page_object = PageObject(page)
+    await page_object.action()
+    
+    # Assert - проверка результатов
+    assert condition, "Clear error message"
+```
+
+### Линейная логика
+- Никаких сложных ветвлений
+- Минимум условных операторов
+- Последовательные проверки
+
+### Минималистичное логирование
+- Только финальное сообщение об успехе
+- Никаких промежуточных логов в тесте
+- Детальное логирование в Page Objects при необходимости
 
 ## Запуск тестов
 
-### Диагностика проблем
-
+### Быстрый старт
 ```bash
-# Запуск диагностического теста
-python run_diagnostic.py
+# Установка зависимостей
+pip install -r requirements.txt
 
-# Или через pytest
-pytest tests/pages/test_diagnostic_home.py -v -s
+# Запуск TEST-002
+pytest tests/test_reviews.py::test_create_guide_review_with_autocomplete -v
+
+# Все тесты отзывов
+pytest tests/test_reviews.py -v
+
+# С визуальным браузером
+pytest tests/test_reviews.py --slow-mo=500
+
+# В headless режиме
+pytest tests/test_reviews.py --headless
 ```
 
-Это покажет:
-- Все кнопки на странице
-- Правильные селекторы
-- HTML структуру элементов
+## Предусловия
 
-### Быстрая проверка (Smoke тесты)
+1. **Backend** запущен на http://localhost:8000
+2. **Frontend** запущен на http://localhost:3000
+3. **База данных** содержит seed данные:
+   - Георгий Челидзе (guide id=1)
+   - Mountain Tours компании
 
-```bash
-# Запуск критически важных тестов
-python tests/run_tests.py smoke
+## Важные соглашения
 
-# Или напрямую через pytest
-pytest tests/pages -m smoke -v
-```
+### Приоритет селекторов
+1. `data-testid` - специальные атрибуты для тестов
+2. `id` - уникальные идентификаторы
+3. `className` - CSS классы
+4. `name` - для полей форм
+5. `text` - для кнопок и ссылок
 
-### Запуск всех E2E тестов
-
-```bash
-# Через скрипт
-python tests/run_tests.py all
-
-# Или напрямую
-pytest tests/pages -v
-```
-
-### Запуск с визуальным браузером
-
-```bash
-# Медленный режим для отладки
-python tests/run_tests.py headed
-
-# Режим отладки (останавливается на первой ошибке)
-python tests/run_tests.py debug
-```
-
-### Запуск конкретного теста
-
-```bash
-# Конкретный файл
-pytest tests/pages/test_review_creation.py -v
-
-# Конкретный тест
-pytest tests/pages/test_review_creation.py::TestReviewCreation::test_create_tour_review_success -v
-```
-
-### Параллельный запуск
-
-```bash
-# С 4 воркерами (по умолчанию)
-python tests/run_tests.py parallel
-
-# С указанием количества воркеров
-python tests/run_tests.py parallel --workers=8
-```
-
-### Запуск с покрытием кода
-
-```bash
-python tests/run_tests.py coverage
-```
-
-### Генерация отчёта
-
-```bash
-python tests/run_tests.py report
-# Отчёт будет в tests/reports/report.html
-```
-
-## Маркеры тестов
-
-- `@pytest.mark.critical` - Критические тесты
-- `@pytest.mark.smoke` - Smoke тесты
-- `@pytest.mark.regression` - Регрессионные тесты
-- `@pytest.mark.e2e` - E2E тесты
-- `@pytest.mark.slow` - Медленные тесты
-- `@pytest.mark.flaky` - Нестабильные тесты
-
-### Запуск тестов по маркерам
-
-```bash
-# Только критические тесты
-pytest tests/pages -m critical
-
-# Smoke тесты, но не медленные
-pytest tests/pages -m "smoke and not slow"
-
-# Все тесты кроме flaky
-pytest tests/pages -m "not flaky"
-```
-
-## Конфигурация
-
-### Переменные окружения
-
-Создайте файл `.env` в корне проекта:
-
-```env
-BACKEND_URL=http://localhost:8000
-FRONTEND_URL=http://localhost:3000
-TEST_ENV=local
-```
-
-### Настройка браузера
-
-В `tests/e2e/conftest.py` можно настроить:
-
-- `headless`: запуск без GUI (по умолчанию False)
-- `slow_mo`: замедление действий в мс (по умолчанию 100)
-- `viewport`: размер окна (по умолчанию 1920x1080)
-
-### Таймауты
-
-В `tests/pytest.ini`:
-- Глобальный таймаут: 60 секунд
-- Таймаут страницы: 30 секунд (в base_page.py)
-
-## Page Objects
-
-### Использование в тестах
-
-```python
-from pages import HomePage, ReviewFormPage
-
-
-async def test_example(page):
-    # Создание Page Objects
-    home_page = HomePage(page)
-    review_form = ReviewFormPage(page)
-
-    # Использование методов
-    await home_page.open()
-    await home_page.click_leave_review()
-    await review_form.fill_tour_review(data)
-    await review_form.submit_form()
-```
-
-### Добавление новых страниц
-
-1. Создайте файл в `tests/e2e/pages/`
-2. Наследуйте от `BasePage`
-3. Определите локаторы как константы класса
-4. Реализуйте методы взаимодействия
-5. Импортируйте в `__init__.py`
-
-## Тестовые данные
-
-### Генераторы данных
-
-```python
-from fixtures import generate_unique_email, generate_unique_name
-
-email = generate_unique_email()
-name = generate_unique_name("TestReview")
-```
-
-### Использование тестовых данных
-
-```python
-from fixtures import get_review_test_data
-
-review_data = get_review_test_data()
-valid_tour = review_data["valid"]["tour_review"]
-invalid_company = review_data["invalid"]["company_review"]
-```
-
-## API для модерации
-
-### Использование в тестах
-
-```python
-from fixtures import TestModerationAPI
-
-async def test_moderation(backend_url):
-    api = TestModerationAPI(backend_url)
-    await api.moderate_review(review_id, "approved")
-    await api.close()
-```
+### Правила кода
+- **Используйте** существующие Page Objects
+- **Следуйте** паттерну AAA
+- **Добавляйте** понятные assert сообщения
+- **НЕ создавайте** новые конфиги
+- **НЕ используйте** time.sleep()
+- **НЕ хардкодьте** данные
 
 ## Отладка
 
-### Скриншоты при ошибках
+### Если тест падает
+1. Проверьте селекторы в DevTools
+2. Посмотрите логи Page Objects
+3. Проверьте seed данные в БД
+4. Запустите с `--slow-mo=1000` для визуальной отладки
 
-Автоматически сохраняются в `tests/screenshots/` при падении тестов.
+### Частые проблемы
 
-### Логирование
+| Проблема | Решение |
+|----------|---------|
+| Селектор не найден | Проверьте актуальность в коде фронтенда |
+| Рейтинг не совпадает | Учтите округление до 0.1 |
+| Cleanup падает | Проверьте admin credentials |
+| Автокомплит не работает | Добавьте wait_for_timeout после ввода |
 
-Логи сохраняются в `tests/logs/pytest.log`
+## Документация тестов
 
-Уровни логирования:
-- Console: INFO
-- File: DEBUG
+- **TEST-001** - базовый тест создания отзыва на компанию
+- **TEST-002** - комплексный тест отзыва на гида с проверкой рейтинга
+- **TEST-002-FIXES.md** - исправления проблемы подсчёта звёзд
+- **TEST-002-ROUNDING.md** - объяснение округления рейтингов
 
-### Запуск в режиме отладки
+---
 
-```bash
-# Максимально подробный вывод
-pytest tests/pages -vvv --capture=no --tb=long
-
-# Или через скрипт
-python tests/run_tests.py debug
-```
-
-## CI/CD интеграция
-
-### GitHub Actions пример
-
-```yaml
-name: E2E Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v2
-      
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          pip install -r tests/requirements.txt
-          playwright install chromium
-      
-      - name: Run services
-        run: |
-          docker-compose up -d
-          sleep 10
-      
-      - name: Run tests
-        run: |
-          pytest tests/e2e -m "critical" --headless
-      
-      - name: Upload reports
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-reports
-          path: tests/reports/
-```
-
-## Проблемы и решения
-
-### CAPTCHA в dev режиме
-
-CAPTCHA автоматически проходится в dev режиме. Если нет, проверьте переменную окружения `TEST_MODE=true` на бэкенде.
-
-### Медленные тесты
-
-1. Используйте параллельный запуск
-2. Разделите на smoke и regression
-3. Оптимизируйте ожидания в Page Objects
-
-### Нестабильные тесты
-
-1. Используйте `assert_with_retry` фикстуру
-2. Увеличьте таймауты
-3. Пометьте как `@pytest.mark.flaky`
-
-## Контакты
-
-По вопросам обращайтесь к QA команде или создайте issue в репозитории.
+**Принцип проекта:** Простые, надёжные тесты, которые работают из коробки и легко поддерживаются.
