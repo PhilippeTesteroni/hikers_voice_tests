@@ -23,6 +23,21 @@ def generate_unique_name(prefix: str = "Test") -> str:
     return f"{prefix}_{timestamp}_{random_suffix}"
 
 
+def generate_company_data() -> Dict[str, Any]:
+    """Generate test data for a new company."""
+    unique_id = generate_unique_name("")
+    return {
+        "name": f"Test Adventure Tours {unique_id}",
+        "country_code": "KZ",
+        "description": "Организация туров по Алтаю и Тянь-Шаню. Профессиональные гиды, безопасные маршруты, незабываемые впечатления.",
+        "email": "info@testadventure.kz",
+        "phone": "+7 777 123-45-67",
+        "website": "https://testadventure.kz",
+        "instagram": "@testadventure",
+        "telegram": "@testadventure_bot"
+    }
+
+
 def get_review_test_data() -> Dict[str, Any]:
     """
     Get comprehensive test data for all review types.

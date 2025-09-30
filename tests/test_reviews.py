@@ -59,7 +59,7 @@ async def test_create_company_review_with_autocomplete(
     # Review data
     review_data = {
         "country_code": "GE",  # Georgia
-        "company_name": "Mountain",  # For autocomplete search
+        "company_name": "Svaneti",  # For autocomplete search
         "select_autocomplete": True,  # Select from dropdown
         "trip_date_from": date_from.strftime("%Y-%m-%d"),
         "trip_date_to": date_to.strftime("%Y-%m-%d"),
@@ -100,7 +100,7 @@ Rating {rating} out of 5 stars. Highly recommended!""",
     await review_form.select_country(review_data["country_code"])
     
     # 4.2: Fill company name with autocomplete
-    await review_form.fill_company_name_with_autocomplete("Mountain")
+    await review_form.fill_company_name_with_autocomplete("Svaneti")
     
     # 4.3: Fill trip dates
     await review_form.fill_trip_dates(
@@ -324,49 +324,48 @@ async def test_create_guide_review_with_autocomplete(
     assert review_id is not None, "Failed to find and moderate anonymous review"
     clean_test_review.append(review_id)
     await test_helper.close()
-    
+
     await page.wait_for_timeout(1000)
-    
+
     # Assert - verify results
-    
     # Check guide page
     await guide_page.open_guide_page(1)
-    
+
     # Verify guide name
     guide_name = await guide_page.get_guide_name()
     assert "Георгий Челидзе" in guide_name, f"Expected guide name not found: {guide_name}"
-    
+
     # Get updated stats
     updated_rating = await guide_page.get_guide_rating()
     updated_reviews_count = await guide_page.get_reviews_count()
-    
+
     # Verify review exists
     review_found = await guide_page.check_review_exists(
         author_name="",
         review_text=review_data["text"][:50]
     )
     assert review_found, "Review not found on guide page"
-    
+
     # Get review element for detailed checks
     review_element = await guide_page.get_review_by_author("")
     assert review_element is not None, "Could not find anonymous review element"
-    
+
     # Check anonymous author
     review_content = await review_element.text_content()
     assert "Автор: Аноним" in review_content, "Author not shown as anonymous"
-    
+
     # Check review text
     assert await guide_page.check_review_text(review_element, review_data["text"][:100]), \
         "Review text does not match"
-    
+
     # Check rating stars
     assert await guide_page.check_review_rating(review_element, review_data["rating"]), \
         f"Rating does not show {review_data['rating']} stars"
-    
+
     # Verify reviews count increased
     assert updated_reviews_count == initial_reviews_count + 1, \
         f"Reviews count should increase by 1: was {initial_reviews_count}, now {updated_reviews_count}"
-    
+
     # Verify rating calculation (with tolerance for backend rounding)
     if updated_rating is not None:
         rating_calc = RatingCalculator()
@@ -375,7 +374,7 @@ async def test_create_guide_review_with_autocomplete(
             initial_reviews_count,
             review_data["rating"]
         )
-        
+
         # Backend rounds to 1 decimal, allow 0.05 tolerance
         is_correct, explanation = rating_calc.verify_rating_change(
             initial_rating,
@@ -386,23 +385,23 @@ async def test_create_guide_review_with_autocomplete(
             tolerance=0.05
         )
         assert is_correct, f"Rating calculation error: {explanation}"
-    
+
     # Check main page
     await home_page.open()
     await home_page.wait_for_reviews_to_load()
-    
+
     main_page_review = await home_page.find_review_by_author("Аноним")
     assert main_page_review is not None, "Review not found on main page"
-    
+
     # Check reviews page
     reviews_page = ReviewsPage(page, frontend_url)
     await reviews_page.open()
-    
+
     reviews_page_found = await reviews_page.check_review_exists(
         author_name="",
         review_text=review_data["text"][:50]
     )
     assert reviews_page_found, "Review not found on Reviews page"
-    
+
     # Test completed successfully
     logger.info(f"TEST-002 completed: review_id={review_id}")

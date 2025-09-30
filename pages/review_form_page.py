@@ -243,6 +243,8 @@ class ReviewFormPage(BasePage):
         
         # Wait for dropdown and select first matching item
         await self.page.wait_for_selector(self.COMPANY_AUTOCOMPLETE, timeout=3000)
+        await self.page.wait_for_timeout(500)  # Let dropdown fully populate
+        
         dropdown_items = self.page.locator(self.COMPANY_AUTOCOMPLETE_ITEM)
         
         # Find and click the first company with search_text in name
@@ -255,6 +257,13 @@ class ReviewFormPage(BasePage):
                 break
         
         assert found, f"No company with '{search_text}' found in autocomplete dropdown"
+        
+        # IMPORTANT: Wait for frontend to process the selection
+        await self.page.wait_for_timeout(1000)  # Give time for form to update with selected company ID
+        
+        # Verify the input has been filled by checking its value
+        input_value = await company_input.input_value()
+        assert input_value, "Company name input should be filled after selection"
     
     async def fill_trip_dates(self, date_from: str, date_to: str) -> None:
         """
@@ -326,6 +335,13 @@ class ReviewFormPage(BasePage):
                     break
         
         assert found, f"No guide with '{select_exact or search_text}' found in autocomplete dropdown"
+        
+        # IMPORTANT: Wait for frontend to process the selection
+        await self.page.wait_for_timeout(1000)  # Give time for form to update with selected guide ID
+        
+        # Verify the input has been filled by checking its value
+        input_value = await guide_input.input_value()
+        assert input_value, "Guide name input should be filled after selection"
     
     async def fill_guide_review(self, data: Dict[str, Any]) -> None:
         """

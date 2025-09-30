@@ -76,6 +76,86 @@ class TestHelper:
             logger.error(f"Error finding/moderating review: {e}")
             return None
     
+    async def find_and_moderate_company(
+        self,
+        company_name: str,
+        action: str = "approve"
+    ) -> Optional[int]:
+        """
+        Find company by name and moderate it.
+        Note: Companies don't have pending status, they are created as approved.
+        This method is kept for compatibility with test flow.
+        
+        Args:
+            company_name: Name of the company
+            action: "approve" or "reject" (for compatibility)
+            
+        Returns:
+            Company ID if found, None otherwise
+        """
+        try:
+            # Get all companies
+            response = await self.client.get("/api/v1/test/companies/all")
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to get companies: {response.status_code}")
+                return None
+            
+            data = response.json()
+            companies = data.get("companies", [])
+            
+            # Find company by name
+            for company in companies:
+                if company.get("name") == company_name:
+                    company_id = company.get("id")
+                    logger.info(f"Found company ID {company_id} for name {company_name}")
+                    
+                    # Call moderate endpoint for compatibility (it will just return success)
+                    mod_response = await self.client.post(
+                        f"/api/v1/test/moderate/company/{company_id}",
+                        params={"action": action}
+                    )
+                    
+                    if mod_response.status_code == 200:
+                        logger.info(f"Company {company_id} moderation completed (action: {action})")
+                        return company_id
+                    else:
+                        logger.error(f"Failed to moderate company: {mod_response.status_code}")
+                        return None
+            
+            logger.warning(f"No company found with name: {company_name}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding/moderating company: {e}")
+            return None
+    
+    async def delete_company(self, company_id: int) -> bool:
+        """
+        Delete a company by ID (for cleanup).
+        
+        Args:
+            company_id: ID of the company to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        try:
+            response = await self.client.delete(
+                f"/api/v1/test/companies/{company_id}"
+            )
+            
+            if response.status_code in [200, 204]:
+                logger.info(f"Successfully deleted company {company_id}")
+                return True
+            else:
+                logger.error(f"Failed to delete company {company_id}: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error deleting company {company_id}: {e}")
+            return False
+    
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()
