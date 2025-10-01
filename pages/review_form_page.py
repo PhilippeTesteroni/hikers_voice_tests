@@ -56,10 +56,15 @@ class ReviewFormPage(BasePage):
     GUIDE_EXPERIENCE_RATING = "[data-testid='experience-rating']"
     GUIDE_COMMUNICATION_RATING = "[data-testid='communication-rating']"
     
-    # Photos upload
+    # Photos upload - based on PhotoUpload component
     PHOTO_UPLOAD_INPUT = "input[type='file'][accept*='image']"
-    PHOTO_PREVIEW = ".photo-preview, [data-testid='photo-preview']"
-    REMOVE_PHOTO_BUTTON = "button[aria-label='Remove photo'], .remove-photo"
+    PHOTO_UPLOAD_ZONE = ".border-dashed"
+    PHOTO_PREVIEW_GRID = ".grid"
+    PHOTO_PREVIEW = ".relative.group.aspect-square"
+    PHOTO_PREVIEW_IMAGE = ".relative.group.aspect-square img"
+    REMOVE_PHOTO_BUTTON = "button[aria-label='Удалить фото']"
+    ADD_MORE_PHOTOS_BUTTON = "button:has-text('Добавить еще фото')"
+    PHOTO_UPLOAD_ERROR = ".text-red-800"
     
     # Rules and agreement
     RULES_CHECKBOX = "input[name='rules_accepted']"
@@ -410,25 +415,89 @@ class ReviewFormPage(BasePage):
     
     async def upload_photos(self, photo_paths: List[str]) -> None:
         """
-        Upload photos to the review.
+        Upload photos to the review using PhotoUpload component.
         
         Args:
             photo_paths: List of photo file paths
         """
-
+        self.logger.info(f"Uploading {len(photo_paths)} photos")
         
-        # Set files to the input
+        # Set files to the hidden input
         await self.page.set_input_files(self.PHOTO_UPLOAD_INPUT, photo_paths)
         
         # Wait for previews to appear
         await self.page.wait_for_selector(self.PHOTO_PREVIEW, timeout=5000)
         
-        # Verify all photos uploaded
-        previews = await self.page.locator(self.PHOTO_PREVIEW).count()
-        if previews != len(photo_paths):
-            self.logger.error(f"Photo upload mismatch: expected {len(photo_paths)}, got {previews}")
+        # Wait for images to load
+        await self.page.wait_for_timeout(1000)
         
-
+        # Verify all photos uploaded
+        actual_count = await self.get_uploaded_photos_count()
+        expected_count = len(photo_paths)
+        
+        if actual_count != expected_count:
+            self.logger.error(f"Photo upload mismatch: expected {expected_count}, got {actual_count}")
+            raise AssertionError(f"Expected {expected_count} photos, but found {actual_count}")
+        
+        self.logger.info(f"Successfully uploaded {actual_count} photos")
+    
+    async def get_uploaded_photos_count(self) -> int:
+        """
+        Get the number of uploaded photos in preview.
+        
+        Returns:
+            Number of photo previews
+        """
+        return await self.page.locator(self.PHOTO_PREVIEW).count()
+    
+    async def verify_photo_previews_visible(self) -> bool:
+        """
+        Verify that all photo previews are visible with images.
+        
+        Returns:
+            True if all previews are properly displayed
+        """
+        previews = self.page.locator(self.PHOTO_PREVIEW_IMAGE)
+        count = await previews.count()
+        
+        if count == 0:
+            return False
+        
+        # Check each preview has a valid src
+        for i in range(count):
+            preview = previews.nth(i)
+            src = await preview.get_attribute("src")
+            
+            if not src or src == "":
+                self.logger.error(f"Preview {i} has no src attribute")
+                return False
+        
+        return True
+    
+    async def remove_photo_by_index(self, index: int) -> None:
+        """
+        Remove a photo by its index in the preview grid.
+        
+        Args:
+            index: Index of the photo to remove (0-based)
+        """
+        previews = self.page.locator(self.PHOTO_PREVIEW)
+        count = await previews.count()
+        
+        if index >= count:
+            raise ValueError(f"Photo index {index} out of range (0-{count-1})")
+        
+        # Hover over the preview to show remove button
+        preview = previews.nth(index)
+        await preview.hover()
+        await self.page.wait_for_timeout(300)  # Wait for hover animation
+        
+        # Click remove button
+        remove_btn = preview.locator(self.REMOVE_PHOTO_BUTTON)
+        await remove_btn.click()
+        
+        # Wait for removal animation
+        await self.page.wait_for_timeout(300)
     
     async def submit_form(self) -> None:
         """Submit the review form."""
@@ -494,11 +563,24 @@ class ReviewFormPage(BasePage):
 
         await self.click_and_wait(self.CANCEL_BUTTON)
     
-    async def wait_for_review_form(self) -> None:
+    async def wait_for_review_form(self, review_type: str = "company") -> None:
         """
         Wait for review form page to be loaded.
+        
+        Args:
+            review_type: Type of review form ('company' or 'guide')
         """
-        # Wait for key form elements to be visible
+        # Wait for key form elements to be visible based on review type
         await self.wait_for_element(self.COUNTRY_SELECT, timeout=10000)
-        await self.wait_for_element(self.COMPANY_NAME_INPUT, timeout=5000)
+        
+        if review_type == "company":
+            await self.wait_for_element(self.COMPANY_NAME_INPUT, timeout=5000)
+        else:  # guide
+            await self.wait_for_element(self.GUIDE_NAME_INPUT, timeout=5000)
+    
+    async def scroll_to_photos_section(self) -> None:
+        """
+        Scroll to the photos upload section of the form.
+        """
+        await self.scroll_to_element(self.PHOTO_UPLOAD_ZONE)
 

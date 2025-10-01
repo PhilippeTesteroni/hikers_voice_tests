@@ -6,6 +6,7 @@ Provides common fixtures and settings for all test types.
 import sys
 import os
 import logging
+from math import trunc
 from pathlib import Path
 import pytest
 
@@ -71,7 +72,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--headless",
         action="store_true",
-        default=False,
+        default=True,
         help="Run browser tests in headless mode (no GUI)"
     )
     parser.addoption(

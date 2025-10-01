@@ -182,6 +182,10 @@ def review_test_data() -> Dict[str, Any]:
     return get_review_test_data()
 
 
+# Import test images fixtures
+pytest_plugins = ["fixtures.test_images_fixtures"]
+
+
 @pytest_asyncio.fixture(scope="function")
 async def clean_test_review(backend_url: str):
     """

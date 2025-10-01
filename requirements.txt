@@ -13,3 +13,6 @@ httpx==0.27.2
 
 # Test data generation
 faker==30.8.1
+
+# Image processing for test image generation
+Pillow==11.0.0
