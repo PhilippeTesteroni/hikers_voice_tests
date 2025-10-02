@@ -72,7 +72,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--headless",
         action="store_true",
-        default=False,
+        default=True,
         help="Run browser tests in headless mode (no GUI)"
     )
     parser.addoption(

@@ -31,6 +31,15 @@ class GuidePage(BasePage):
     BACK_BUTTON = "a:has-text('← Назад')"
     LEAVE_REVIEW_BUTTON = "a:has-text('Оставить отзыв')"
     
+    # Photo gallery elements
+    PHOTO_GALLERY_SECTION = ".card:has-text('Фотографии из отзывов')"
+    PHOTO_THUMBNAIL = "button.relative.aspect-square"
+    LIGHTBOX_DIALOG = "div[role='dialog']"
+    LIGHTBOX_COUNTER = ".absolute.top-4.left-4.text-white"
+    LIGHTBOX_CLOSE_BUTTON = "button[aria-label='Закрыть']"
+    LIGHTBOX_NEXT_BUTTON = "button[aria-label='Следующее фото']"
+    LIGHTBOX_PREV_BUTTON = "button[aria-label='Предыдущее фото']"
+    
     # New guide form selectors
     GUIDE_NAME_INPUT = "input#name"
     GUIDE_DESCRIPTION_TEXTAREA = "textarea#description"
@@ -113,22 +122,16 @@ class GuidePage(BasePage):
             Average rating or None if no rating
         """
         try:
-            # Look for rating text like "4.5/5"
-            rating_elements = await self.page.locator(self.GUIDE_RATING).all()
-            for element in rating_elements:
-                text = await element.text_content()
-                if text and "/5" in text:
-                    rating_str = text.split("/")[0].strip()
-                    return float(rating_str)
-            
-            # Alternative: look for any text with pattern X.X/5 or X/5
-            import re
-            page_text = await self.page.locator("body").text_content()
-            if page_text:
-                # Search for rating pattern
-                rating_match = re.search(r'(\d+\.?\d*)\s*/\s*5', page_text)
-                if rating_match:
-                    return float(rating_match.group(1))
+            # Look for rating in stats blocks
+            stats_blocks = await self.page.query_selector_all(".flex.items-center.space-x-3")
+            for block in stats_blocks:
+                text = await block.text_content()
+                if 'Рейтинг' in text and '/' in text:
+                    # Extract rating from text like "Рейтинг4.5/5.0"
+                    import re
+                    match = re.search(r'(\d+\.\d+)/5\.0', text)
+                    if match:
+                        return float(match.group(1))
         except Exception as e:
             self.logger.error(f"Failed to get guide rating: {e}")
         return None
@@ -141,13 +144,13 @@ class GuidePage(BasePage):
             Number of reviews
         """
         try:
-            # Look for text like "15 отзывов"
-            elements = await self.page.locator("text=/\\d+ отзыв/").all()
-            for element in elements:
-                text = await element.text_content()
-                if text:
-                    # Extract number from text
-                    import re
+            import re
+            # Look for reviews in stats blocks
+            stats_blocks = await self.page.query_selector_all(".flex.items-center.space-x-3")
+            for block in stats_blocks:
+                text = await block.text_content()
+                if 'Отзывы' in text:
+                    # Extract count from text like "Отзывы15 оценок"
                     match = re.search(r'(\d+)', text)
                     if match:
                         return int(match.group(1))
@@ -471,3 +474,96 @@ class GuidePage(BasePage):
             return True
         except:
             return False
+    
+    async def has_photo_gallery(self) -> bool:
+        """
+        Check if photo gallery section is present on guide page.
+        
+        Returns:
+            True if photo gallery exists
+        """
+        gallery = self.page.locator(self.PHOTO_GALLERY_SECTION)
+        return await gallery.count() > 0
+    
+    async def get_photo_thumbnails_count(self) -> int:
+        """
+        Get the number of photo thumbnails displayed in gallery.
+        
+        Returns:
+            Number of thumbnails
+        """
+        thumbnails = self.page.locator(self.PHOTO_THUMBNAIL)
+        return await thumbnails.count()
+    
+    async def click_photo_thumbnail(self, index: int = 0) -> None:
+        """
+        Click on a photo thumbnail to open lightbox.
+        
+        Args:
+            index: Index of thumbnail to click (0-based)
+        """
+        thumbnail = self.page.locator(self.PHOTO_THUMBNAIL).nth(index)
+        await thumbnail.click()
+        await self.page.wait_for_timeout(500)
+    
+    async def is_lightbox_open(self) -> bool:
+        """
+        Check if photo lightbox is currently open.
+        
+        Returns:
+            True if lightbox is visible
+        """
+        lightbox = self.page.locator(self.LIGHTBOX_DIALOG)
+        return await lightbox.is_visible()
+    
+    async def get_lightbox_counter_text(self) -> str:
+        """
+        Get the current lightbox counter text (e.g., '1 / 15').
+        
+        Returns:
+            Counter text
+        """
+        counter = self.page.locator(self.LIGHTBOX_COUNTER).first
+        if await counter.is_visible():
+            text = await counter.text_content()
+            return text.strip() if text else ""
+        return ""
+    
+    async def verify_lightbox_counter(self, current: int, total: int) -> bool:
+        """
+        Verify lightbox counter shows expected values.
+        
+        Args:
+            current: Expected current photo number
+            total: Expected total photos count
+            
+        Returns:
+            True if counter matches expected
+        """
+        counter_text = await self.get_lightbox_counter_text()
+        expected = f"{current} / {total}"
+        return counter_text == expected
+    
+    async def navigate_lightbox_next(self) -> None:
+        """
+        Navigate to next photo in lightbox.
+        """
+        next_btn = self.page.locator(self.LIGHTBOX_NEXT_BUTTON)
+        await next_btn.click()
+        await self.page.wait_for_timeout(300)
+    
+    async def navigate_lightbox_prev(self) -> None:
+        """
+        Navigate to previous photo in lightbox.
+        """
+        prev_btn = self.page.locator(self.LIGHTBOX_PREV_BUTTON)
+        await prev_btn.click()
+        await self.page.wait_for_timeout(300)
+    
+    async def close_lightbox(self) -> None:
+        """
+        Close the photo lightbox.
+        """
+        close_btn = self.page.locator(self.LIGHTBOX_CLOSE_BUTTON)
+        await close_btn.click()
+        await self.page.wait_for_timeout(500)

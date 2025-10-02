@@ -110,18 +110,9 @@ class TestHelper:
                     company_id = company.get("id")
                     logger.info(f"Found company ID {company_id} for name {company_name}")
                     
-                    # Call moderate endpoint for compatibility (it will just return success)
-                    mod_response = await self.client.post(
-                        f"/api/v1/test/moderate/company/{company_id}",
-                        params={"action": action}
-                    )
-                    
-                    if mod_response.status_code == 200:
-                        logger.info(f"Company {company_id} moderation completed (action: {action})")
-                        return company_id
-                    else:
-                        logger.error(f"Failed to moderate company: {mod_response.status_code}")
-                        return None
+                    # Companies are auto-approved, so just return the ID
+                    logger.info(f"Company {company_id} is already approved (companies don't need moderation)")
+                    return company_id
             
             logger.warning(f"No company found with name: {company_name}")
             return None
@@ -232,6 +223,50 @@ class TestHelper:
                 
         except Exception as e:
             logger.error(f"Error deleting guide {guide_id}: {e}")
+            return False
+    
+    async def delete_review(self, review_id: int) -> bool:
+        """
+        Delete a review by ID using admin panel endpoint (for cleanup).
+        
+        Args:
+            review_id: ID of the review to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        import base64
+        
+        # Admin credentials - EXACTLY as in backend
+        ADMIN_USERNAME = "Philippe_testeroni"
+        ADMIN_PASSWORD = "KeklikG0nnaKek!"
+        
+        # Create Basic Auth header
+        credentials = f"{ADMIN_USERNAME}:{ADMIN_PASSWORD}"
+        encoded_credentials = base64.b64encode(credentials.encode()).decode('ascii')
+        auth_headers = {"Authorization": f"Basic {encoded_credentials}"}
+        
+        try:
+            response = await self.client.post(
+                f"/admin/review/{review_id}/delete",
+                headers=auth_headers,
+                follow_redirects=False
+            )
+            
+            # 303 See Other is the expected response (redirect after deletion)
+            if response.status_code == 303:
+                logger.info(f"Successfully deleted review {review_id}")
+                return True
+            elif response.status_code == 401:
+                logger.error(f"Failed to authenticate with admin panel for review {review_id}")
+                logger.error(f"Tried credentials: {ADMIN_USERNAME}")
+                return False
+            else:
+                logger.error(f"Failed to delete review {review_id}: HTTP {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error deleting review {review_id}: {e}")
             return False
     
     async def close(self):

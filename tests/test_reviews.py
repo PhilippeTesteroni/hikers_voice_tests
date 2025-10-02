@@ -1,4 +1,5 @@
 """E2E tests for review creation functionality."""
+import re
 import pytest
 import logging
 from datetime import datetime, timedelta
@@ -8,6 +9,7 @@ from playwright.async_api import Page
 from pages import HomePage
 from pages import ReviewFormPage
 from pages import GuidePage
+from pages import CompanyPage
 from pages import ReviewsPage
 from utils.test_helper import TestHelper
 from utils.rating_calculator import RatingCalculator
@@ -17,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.e2e
 @pytest.mark.critical
-@pytest.mark.parametrize("rating", [5])
+@pytest.mark.parametrize("rating", [1, 5])
 async def test_create_company_review_with_autocomplete(
     page: Page,
     api_client: Dict[str, Any],
@@ -214,17 +216,50 @@ Rating {rating} out of 5 stars. Highly recommended!""",
     # Check author name display
     assert await home_page.check_author_on_review_page(review_data['author_name']), \
         f"Author name '{review_data['author_name']}' not found on review page"
-
+    
+    # Step 11: Navigate to company page and verify rating/reviews count
+    # Get company name from review page where we currently are
+    company_link = await page.query_selector("a[href*='/companies/']")
+    assert company_link is not None, "Company link not found on review page"
+    
+    company_name = await company_link.text_content()
+    company_href = await company_link.get_attribute("href")
+    
+    # Extract company ID from href like "/companies/123"
+    match = re.search(r'/companies/(\d+)', company_href)
+    assert match is not None, f"Could not extract company ID from href: {company_href}"
+    
+    company_id = int(match.group(1))
+    logger.info(f"Review is for company: {company_name} (ID: {company_id})")
+    
+    # Navigate to company page
+    company_page = CompanyPage(page)
+    await company_page.open_company_page(company_id)
+    current_rating = await company_page.get_company_rating()
+    current_reviews_count = await company_page.get_company_reviews_count()
+    
+    logger.info(f"Company page - Rating: {current_rating}, Reviews count: {current_reviews_count}")
+    
+    # Verify review count is positive
+    assert current_reviews_count > 0, f"Expected at least 1 review on company page, got {current_reviews_count}"
+    
+    # Verify rating is displayed and within valid range
+    assert current_rating is not None, "Rating element not found on company page"
+    assert 1.0 <= current_rating <= 5.0, f"Rating should be between 1.0 and 5.0, got {current_rating}"
+    logger.info(f"✓ Company rating verified: {current_rating:.1f}/5.0 with {current_reviews_count} reviews")
+    
     # Test completed successfully
-    logger.info(f"TEST-001 completed: review_id={review_id if review_id else 'N/A'}")
+    logger.info(f"TEST-001 completed: review_id={review_id if review_id else 'N/A'}, rating={rating}/5")
 
 
 @pytest.mark.e2e
 @pytest.mark.critical
+@pytest.mark.parametrize("rating", [1, 5])
 async def test_create_guide_review_with_autocomplete(
     page: Page,
     api_client: Dict[str, Any],
     review_test_data: dict,
+    rating: int,
     clean_test_review: list,
     frontend_url: str,
     backend_url: str
@@ -251,14 +286,20 @@ async def test_create_guide_review_with_autocomplete(
     date_from = datetime.now() - timedelta(days=20)
     date_to = datetime.now() - timedelta(days=15)
     
+    # Adjust review text based on rating
+    if rating == 5:
+        review_text = "Отличный гид! Профессионал, знает маршруты как свои пять пальцев. Все на высшем уровне!"
+    else:  # rating == 1
+        review_text = "Очень разочарован. Не рекомендую."
+    
     review_data = {
         "country_code": "RU",
         "guide_search": "Георгий",
         "guide_name": "Георгий Челидзе",
         "trip_date_from": date_from.strftime("%Y-%m-%d"),
         "trip_date_to": date_to.strftime("%Y-%m-%d"),
-        "rating": 4,
-        "text": "Хороший гид, знает маршруты. Немного не хватило организованности с тайм-менеджментом, но в целом всё понравилось.",
+        "rating": rating,
+        "text": review_text,
         "author_name": "",  # Empty for anonymity
         "author_contact": "+7 900 123-45-67",
         "rules_accepted": True
@@ -328,7 +369,7 @@ async def test_create_guide_review_with_autocomplete(
     await page.wait_for_timeout(1000)
 
     # Assert - verify results
-    # Check guide page
+    # Check guide page (Georgy Chelidze is guide ID 1)
     await guide_page.open_guide_page(1)
 
     # Verify guide name
@@ -338,6 +379,37 @@ async def test_create_guide_review_with_autocomplete(
     # Get updated stats
     updated_rating = await guide_page.get_guide_rating()
     updated_reviews_count = await guide_page.get_reviews_count()
+    
+    logger.info(f"Guide page stats - Rating: {updated_rating}, Reviews: {updated_reviews_count}")
+
+    # Verify review count is displayed correctly
+    assert updated_reviews_count == initial_reviews_count + 1, \
+        f"Reviews count should increase by 1: was {initial_reviews_count}, now {updated_reviews_count}"
+    
+    # Verify rating is displayed and within valid range
+    assert updated_rating is not None, "Rating element not found on guide page"
+    assert 1.0 <= updated_rating <= 5.0, f"Rating should be between 1.0 and 5.0, got {updated_rating}"
+    logger.info(f"Guide rating verified: {updated_rating:.1f}/5.0 with {updated_reviews_count} reviews")
+    
+    # Verify rating calculation (with tolerance for backend rounding)
+    rating_calc = RatingCalculator()
+    expected_rating, _ = rating_calc.calculate_new_rating(
+        initial_rating,
+        initial_reviews_count,
+        rating
+    )
+    
+    # Allow 0.05 tolerance for rounding
+    is_correct, explanation = rating_calc.verify_rating_change(
+        initial_rating,
+        initial_reviews_count,
+        rating,
+        updated_rating,
+        updated_reviews_count,
+        tolerance=0.05
+    )
+    assert is_correct, f"Rating calculation error: {explanation}"
+    logger.info(f"Rating calculation verified: {explanation}")
 
     # Verify review exists
     review_found = await guide_page.check_review_exists(
@@ -362,30 +434,6 @@ async def test_create_guide_review_with_autocomplete(
     assert await guide_page.check_review_rating(review_element, review_data["rating"]), \
         f"Rating does not show {review_data['rating']} stars"
 
-    # Verify reviews count increased
-    assert updated_reviews_count == initial_reviews_count + 1, \
-        f"Reviews count should increase by 1: was {initial_reviews_count}, now {updated_reviews_count}"
-
-    # Verify rating calculation (with tolerance for backend rounding)
-    if updated_rating is not None:
-        rating_calc = RatingCalculator()
-        expected_rating, _ = rating_calc.calculate_new_rating(
-            initial_rating,
-            initial_reviews_count,
-            review_data["rating"]
-        )
-
-        # Backend rounds to 1 decimal, allow 0.05 tolerance
-        is_correct, explanation = rating_calc.verify_rating_change(
-            initial_rating,
-            initial_reviews_count,
-            review_data["rating"],
-            updated_rating,
-            updated_reviews_count,
-            tolerance=0.05
-        )
-        assert is_correct, f"Rating calculation error: {explanation}"
-
     # Check main page
     await home_page.open()
     await home_page.wait_for_reviews_to_load()
@@ -402,9 +450,60 @@ async def test_create_guide_review_with_autocomplete(
         review_text=review_data["text"][:50]
     )
     assert reviews_page_found, "Review not found on Reviews page"
+    
+    # Step: Navigate to guides catalog and verify rating/reviews count on guide card
+    # Get guide name and ID from review page where we currently are
+    guide_link = await page.query_selector("a[href*='/guides/']")
+    assert guide_link is not None, "Guide link not found on review page"
+    
+    guide_name_from_review = await guide_link.text_content()
+    guide_href = await guide_link.get_attribute("href")
+    
+    # Extract guide ID from href like "/guides/123"
+    match = re.search(r'/guides/(\d+)', guide_href)
+    assert match is not None, f"Could not extract guide ID from href: {guide_href}"
+    
+    guide_id = int(match.group(1))
+    logger.info(f"Review is for guide: {guide_name_from_review} (ID: {guide_id})")
+    
+    # Navigate to guides catalog
+    await page.goto(f"{frontend_url}/guides")
+    await page.wait_for_load_state("networkidle")
+    
+    # Find guide card by exact guide name from review
+    guide_card = await page.query_selector(f"article.card:has-text('{guide_name_from_review}')")
+    assert guide_card is not None, f"Guide card for '{guide_name_from_review}' not found in catalog"
+    
+    # Get rating from card - Rating component shows score in <span class="text-sm font-medium">
+    card_rating_element = await guide_card.query_selector("span.text-sm.font-medium")
+    assert card_rating_element is not None, "Rating element not found on guide card"
+    
+    rating_text = await card_rating_element.text_content()
+    assert rating_text, f"Rating text is empty on card"
+    
+    # Rating is displayed as "3.7" without "/5"
+    card_rating = float(rating_text.strip())
+    logger.info(f"Guide card - Rating: {card_rating}")
+    
+    # Verify rating matches the one from guide page
+    assert abs(card_rating - updated_rating) < 0.1, \
+        f"Card rating {card_rating} doesn't match guide page rating {updated_rating}"
+    
+    # Get reviews count from card - look for pattern like "3 отзыва" or "1 отзыв"
+    card_content = await guide_card.text_content()
+    reviews_match = re.search(r'(\d+)\s+отзыв', card_content)
+    assert reviews_match is not None, "Reviews count not found on guide card"
+    
+    card_reviews_count = int(reviews_match.group(1))
+    logger.info(f"Guide card - Reviews count: {card_reviews_count}")
+    
+    # Verify count matches
+    assert card_reviews_count == updated_reviews_count, \
+        f"Card shows {card_reviews_count} reviews but guide page shows {updated_reviews_count}"
+    logger.info(f"✓ Guide card stats verified: {card_rating}/5.0 with {card_reviews_count} reviews")
 
     # Test completed successfully
-    logger.info(f"TEST-002 completed: review_id={review_id}")
+    logger.info(f"TEST-002 completed: review_id={review_id}, rating={rating}/5")
 
 
 @pytest.mark.e2e

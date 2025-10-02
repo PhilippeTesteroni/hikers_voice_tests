@@ -34,17 +34,19 @@ class ReviewsPage(BasePage):
     PREV_PAGE = "a:has-text('Предыдущая')"
     
     # Photo gallery on review detail page
-    PHOTO_GALLERY_TITLE = "h3:has-text('Фотографии')"
-    PHOTO_GALLERY_GRID = ".grid"
-    PHOTO_THUMBNAIL = "button[aria-label*='Открыть фото']"
-    PHOTO_THUMBNAIL_IMAGE = "button[aria-label*='Открыть фото'] img"
-    PHOTO_LIGHTBOX = "div.fixed.inset-0.z-50"
-    PHOTO_LIGHTBOX_IMAGE = "div.fixed.inset-0.z-50 img"
-    PHOTO_LIGHTBOX_CLOSE = "button[aria-label='Закрыть галерею']"
-    PHOTO_LIGHTBOX_COUNTER = "div.absolute.top-4.left-4"
-    # Desktop buttons (visible on sm: and up)
-    PHOTO_LIGHTBOX_NEXT = "button[aria-label='Следующая фотография'].sm\\:block"
-    PHOTO_LIGHTBOX_PREV = "button[aria-label='Предыдущая фотография'].sm\\:block"
+    # Updated selectors based on PhotoGallery.tsx component
+    PHOTO_GALLERY_SECTION = "div:has(> div > h3:has-text('Фото'))"  # Container with title starting with "Фото"
+    PHOTO_GALLERY_TITLE = "h3:has-text('Фото')"  # Title can be "Фотографии из отзывов" or custom
+    PHOTO_GALLERY_GRID = ".grid"  # Grid with thumbnails
+    PHOTO_THUMBNAIL = "button.relative.aspect-square"  # Thumbnail buttons
+    PHOTO_THUMBNAIL_IMAGE = "button.relative.aspect-square img"  # Images in thumbnails
+    # Lightbox selectors based on PhotoGallery.tsx modal
+    PHOTO_LIGHTBOX = "div.fixed.inset-0.z-50"  # Modal overlay
+    PHOTO_LIGHTBOX_IMAGE = "div.fixed.inset-0.z-50 img"  # Image in modal
+    PHOTO_LIGHTBOX_CLOSE = "button[aria-label='Закрыть']"  # Close button
+    PHOTO_LIGHTBOX_COUNTER = "div.absolute.top-4.left-4"  # Photo counter (e.g., "1 / 5")
+    PHOTO_LIGHTBOX_NEXT = "button[aria-label='Следующее фото']"  # Next button
+    PHOTO_LIGHTBOX_PREV = "button[aria-label='Предыдущее фото']"  # Previous button
     
     def __init__(self, page: Page, base_url: str = "http://localhost:3000"):
         """
@@ -201,7 +203,9 @@ class ReviewsPage(BasePage):
         Returns:
             True if photo gallery is present
         """
-        return await self.is_element_visible(self.PHOTO_GALLERY_TITLE, timeout=2000)
+        title_visible = await self.is_element_visible(self.PHOTO_GALLERY_TITLE, timeout=3000)
+        self.logger.info(f"Photo gallery title visible: {title_visible}")
+        return title_visible
     
     async def get_photos_count(self) -> int:
         """
@@ -213,7 +217,23 @@ class ReviewsPage(BasePage):
         if not await self.has_photo_gallery():
             return 0
         
-        return await self.page.locator(self.PHOTO_THUMBNAIL).count()
+        # Wait for grid to be visible
+        await self.page.wait_for_selector(self.PHOTO_GALLERY_GRID, state="visible", timeout=3000)
+        
+        # Try primary selector - button thumbnails
+        count = await self.page.locator(self.PHOTO_THUMBNAIL).count()
+        
+        # If no photos found with primary selector, try alternatives
+        if count == 0:
+            # Try looking for any buttons in grid
+            count = await self.page.locator(".grid button").count()
+            
+            # If still no photos, try looking for images
+            if count == 0:
+                count = await self.page.locator(".grid img").count()
+        
+        self.logger.info(f"Found {count} photos in gallery")
+        return count
     
     async def verify_photos_count(self, expected_count: int) -> bool:
         """

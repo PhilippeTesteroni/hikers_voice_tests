@@ -202,8 +202,8 @@ async def clean_test_review(backend_url: str):
     import httpx
     import base64
     
-    # Admin credentials from backend/app/api/admin/reviews.py
-    ADMIN_USERNAME = "philippe_testeroni"
+    # Admin credentials - EXACTLY as in backend
+    ADMIN_USERNAME = "Philippe_testeroni"
     ADMIN_PASSWORD = "KeklikG0nnaKek!"
     
     # Create Basic Auth header
@@ -215,6 +215,7 @@ async def clean_test_review(backend_url: str):
     yield review_ids
     
     # Cleanup: Delete test reviews using admin panel endpoint
+    # This runs even if test fails, ensuring no test data accumulation
     if review_ids:
         logger.info(f"Cleaning up {len(review_ids)} test reviews: {review_ids}")
         
@@ -229,7 +230,10 @@ async def clean_test_review(backend_url: str):
                     
                     # 303 See Other is the expected response (redirect after deletion)
                     if response.status_code == 303:
-                        pass  # Success - review deleted
+                        logger.info(f"Cleaned up review {review_id}")
+                    elif response.status_code == 404:
+                        # Review already deleted (by test itself) - this is OK
+                        logger.info(f"Review {review_id} already deleted")
                     elif response.status_code == 401:
                         # Authentication failed - critical error
                         logger.error(f"Failed to authenticate with admin panel for review {review_id}")
@@ -246,7 +250,7 @@ async def clean_test_review(backend_url: str):
                         pytest.fail(
                             f"CLEANUP FAILED: Could not delete test review {review_id}. "
                             f"HTTP Status: {response.status_code}. "
-                            f"Expected: 303 (redirect after delete). "
+                            f"Expected: 303 (redirect after delete) or 404 (already deleted). "
                             f"\n\nThis will cause test data accumulation! "
                             f"\n\nManual cleanup required: "
                             f"POST http://localhost:8000/admin/review/{review_id}/delete"

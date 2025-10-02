@@ -78,7 +78,7 @@ async def test_review_with_photos(
     if review_type == "company":
         review_data = {
             "country_code": "GE",
-            "company_name": "Svaneti",  # Existing company for autocomplete
+            "company_name": "Georgian Adventures",  # Existing company ID=1
             "select_autocomplete": True,
             "trip_date_from": date_from.strftime("%Y-%m-%d"),
             "trip_date_to": date_to.strftime("%Y-%m-%d"),
