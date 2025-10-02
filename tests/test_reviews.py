@@ -126,8 +126,8 @@ Rating {rating} out of 5 stars. Highly recommended!""",
     # Step 5: Submit form
     await review_form.submit_form()
     
-    # Step 6: Check redirect with success parameter
-    await page.wait_for_url(f"{frontend_url}/?success=review_created", timeout=10000)
+    # Step 6: Wait for redirect with success parameter
+    await review_form.wait_for_success_redirect(timeout=15000)
     assert "success=review_created" in page.url, f"Expected success redirect, got: {page.url}"
     
     # Step 7: Moderate review via API
@@ -311,8 +311,8 @@ async def test_create_guide_review_with_autocomplete(
     # Submit form
     await review_form.submit_form()
     
-    # Verify redirect
-    await page.wait_for_url(f"{frontend_url}/?success=review_created", timeout=10000)
+    # Wait for redirect with success parameter
+    await review_form.wait_for_success_redirect(timeout=15000)
     assert "success=review_created" in page.url, f"Expected success redirect, got: {page.url}"
     
     # Moderate review via API

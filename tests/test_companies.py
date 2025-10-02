@@ -237,3 +237,87 @@ async def test_company_validation_errors(
     assert website_error is not None, "Website validation error not shown"
     
     logger.info("TEST-003c completed: Form validation works correctly")
+
+
+@pytest.mark.e2e
+@pytest.mark.critical
+async def test_duplicate_company_detection_and_navigation(
+        page: Page,
+        frontend_url: str
+):
+    """
+    TEST-006: Test duplicate company detection and navigation to existing company.
+
+    Steps:
+    1. Open companies page and get name of first existing company
+    2. Navigate to new company form
+    3. Fill form with existing company name
+    4. Submit form
+    5. Verify duplicate warning appears with two buttons
+    6. Click "View existing company" button
+    7. Verify navigation to correct company page
+    8. Verify company name matches the original
+
+    Args:
+        page: Playwright Page instance
+        frontend_url: Frontend base URL
+    """
+
+    # Arrange
+    company_page = CompanyPage(page)
+
+    # Step 1: Get existing company name from companies list
+    await company_page.open_companies_page()
+    existing_company_name = await company_page.get_first_company_name()
+
+    assert existing_company_name, "No companies found on the companies page"
+    logger.info(f"Found existing company: {existing_company_name}")
+
+    # Step 2: Navigate to new company form
+    await company_page.click_add_company_button()
+
+    # Step 3: Fill form with existing company name and other required fields
+    duplicate_company_data = {
+        "name": existing_company_name,
+        "country_code": "GE",  # Georgia
+        "description": "This is a test duplicate company description for testing purposes."
+    }
+
+    await company_page.fill_company_form(duplicate_company_data)
+
+    # Step 4: Submit form
+    await company_page.submit_company_form()
+
+    # Step 5: Wait for duplicate warning to appear
+    duplicate_warning_appeared = await company_page.wait_for_duplicate_warning()
+    assert duplicate_warning_appeared, "Duplicate company warning did not appear after submitting duplicate company name"
+
+    # Verify warning message contains company name
+    duplicate_message_element = await page.query_selector(company_page.DUPLICATE_MESSAGE)
+    assert duplicate_message_element is not None, "Duplicate message element not found"
+
+    # Verify both buttons are present
+    view_button = await page.query_selector(company_page.VIEW_EXISTING_COMPANY_BUTTON)
+    try_again_button = await page.query_selector(company_page.TRY_AGAIN_BUTTON)
+
+    assert view_button is not None, "'View existing company' button not found"
+    assert try_again_button is not None, "'Try again' button not found"
+
+    logger.info("Duplicate warning displayed with both buttons")
+
+    # Step 6: Click "View existing company" button
+    await company_page.click_view_existing_company()
+
+    # Step 7: Verify we're on company details page
+    await page.wait_for_url("**/companies/**", timeout=10000)
+    current_url = await company_page.get_current_url()
+    assert "/companies/" in current_url, f"Not redirected to company page, current URL: {current_url}"
+
+    logger.info(f"Navigated to company page: {current_url}")
+
+    # Step 8: Verify company name matches original
+    displayed_company_name = await company_page.get_company_name()
+    assert displayed_company_name == existing_company_name, \
+        f"Company name mismatch. Expected: '{existing_company_name}', Got: '{displayed_company_name}'"
+
+    logger.info(f"TEST-006 completed successfully: Company name verified as '{displayed_company_name}'")

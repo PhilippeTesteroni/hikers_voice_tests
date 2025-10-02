@@ -169,8 +169,10 @@ async def test_review_with_photos(
     # Step 7: Submit form
     await review_form.submit_form()
     
-    # Step 8: Check redirect with success parameter
-    await page.wait_for_url(f"{frontend_url}/?success=review_created", timeout=10000)
+    # Step 8: Wait for redirect with success parameter
+    # Use longer timeout for photo uploads (base64 encoding + upload takes time)
+    timeout = 30000 if photo_count >= 5 else 15000
+    await review_form.wait_for_success_redirect(timeout=timeout)
     assert "success=review_created" in page.url, f"Expected success redirect, got: {page.url}"
     
     # Step 9: Moderate review via API

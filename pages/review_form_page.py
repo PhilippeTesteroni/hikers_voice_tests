@@ -49,8 +49,11 @@ class ReviewFormPage(BasePage):
     # Guide review specific fields
     GUIDE_SELECT = "select[name='guide_id'], [data-testid='guide-select']"
     GUIDE_NAME_INPUT = "input[placeholder*='Начните вводить имя гида']"
-    GUIDE_AUTOCOMPLETE = ".dropdown"
-    GUIDE_AUTOCOMPLETE_ITEM = ".dropdown-item"
+    # GuidesSelector component (used in company review form)
+    GUIDES_SELECTOR_INPUT = "input[placeholder*='Поиск гида по имени']"
+    # Dropdown with autocomplete results - uses classes from GuideAutocomplete component
+    GUIDE_AUTOCOMPLETE = "div.absolute.z-10.w-full.mt-1[class*='bg-']"
+    GUIDE_AUTOCOMPLETE_ITEM = "button.w-full.text-left"
     GUIDE_LANGUAGES_INPUT = "input[name='languages'], input[placeholder*='Языки']"
     GUIDE_SPECIALIZATION_INPUT = "input[name='specialization'], input[placeholder*='Специализация']"
     GUIDE_EXPERIENCE_RATING = "[data-testid='experience-rating']"
@@ -503,9 +506,17 @@ class ReviewFormPage(BasePage):
         """Submit the review form."""
         # Click submit button
         await self.page.click(self.SUBMIT_BUTTON)
+    
+    async def wait_for_success_redirect(self, timeout: int = 10000) -> None:
+        """Wait for successful redirect after form submission.
         
-        # Wait for redirect to home with success parameter
-        await self.page.wait_for_url(f"{self.base_url}/?success=review_created", timeout=10000)
+        Args:
+            timeout: Maximum time to wait in milliseconds
+        """
+        await self.page.wait_for_url(
+            f"{self.base_url}/?success=review_created", 
+            timeout=timeout
+        )
     
     async def get_validation_errors(self) -> List[str]:
         """
@@ -583,4 +594,130 @@ class ReviewFormPage(BasePage):
         Scroll to the photos upload section of the form.
         """
         await self.scroll_to_element(self.PHOTO_UPLOAD_ZONE)
+    
+    async def type_guide_name_and_wait_dropdown(self, search_text: str, wait_time: int = 1000, form_type: str = "guide") -> None:
+        """
+        Type guide name and wait for autocomplete dropdown to appear.
+        
+        Args:
+            search_text: Text to type in guide name field
+            wait_time: Time to wait for dropdown (ms)
+            form_type: Type of form ('guide' or 'company') to select correct input
+        """
+        # Select correct input based on form type
+        input_selector = self.GUIDES_SELECTOR_INPUT if form_type == "company" else self.GUIDE_NAME_INPUT
+        guide_input = self.page.locator(input_selector)
+        await guide_input.clear()
+        
+        # Важно: сначала кликаем, чтобы установить фокус и показать dropdown
+        await guide_input.click()
+        
+        # Ждем немного после клика
+        await self.page.wait_for_timeout(300)
+        
+        # Вводим текст с задержкой
+        await guide_input.type(search_text, delay=100)
+        
+        # Ждем debounce (300ms в компоненте) + время на запрос к API
+        await self.page.wait_for_timeout(500)
+        
+        # Wait for dropdown to appear with results or loading state
+        await self.page.wait_for_selector(self.GUIDE_AUTOCOMPLETE, timeout=5000, state="visible")
+        
+        # Wait additional time for results to populate
+        await self.page.wait_for_timeout(wait_time)
+    
+    async def get_guide_dropdown_items(self) -> List[Dict[str, str]]:
+        """
+        Get all guide options from autocomplete dropdown with their details.
+        
+        Returns:
+            List of dictionaries with guide information:
+            {
+                'name': 'Guide Name',
+                'line2': 'Иконка Грузия, Армения • 📱 @contact'
+            }
+        """
+        items = []
+        dropdown_items = self.page.locator(self.GUIDE_AUTOCOMPLETE_ITEM)
+        count = await dropdown_items.count()
+        
+        for i in range(count):
+            item = dropdown_items.nth(i)
+            
+            # Get guide name (first line - font-medium)
+            name_elem = item.locator(".font-medium").first
+            name = await name_elem.text_content()
+            
+            # Get second line with countries and contact (text-xs text-gray-600)
+            line2_elem = item.locator(".text-xs.text-gray-600, .text-xs.text-gray-400").first
+            line2 = await line2_elem.text_content() if await line2_elem.count() > 0 else ""
+            
+            items.append({
+                'name': name.strip() if name else "",
+                'line2': line2.strip() if line2 else ""
+            })
+        
+        return items
+    
+    async def verify_guide_dropdown_contains(self, expected_name: str) -> bool:
+        """
+        Verify that guide dropdown contains an option with expected name.
+        
+        Args:
+            expected_name: Expected guide name
+            
+        Returns:
+            True if guide found in dropdown
+        """
+        items = await self.get_guide_dropdown_items()
+        for item in items:
+            if expected_name in item['name']:
+                return True
+        return False
+    
+    async def verify_guide_dropdown_item_format(self, guide_name: str) -> Dict[str, Any]:
+        """
+        Verify format of a specific guide dropdown item.
+        
+        Args:
+            guide_name: Guide name to find
+            
+        Returns:
+            Dictionary with verification results:
+            {
+                'found': bool,
+                'has_countries': bool,
+                'has_contact': bool,
+                'has_rating': bool,
+                'line2_content': str
+            }
+        """
+        items = await self.get_guide_dropdown_items()
+        
+        for item in items:
+            if guide_name in item['name']:
+                line2 = item['line2']
+                
+                return {
+                    'found': True,
+                    'name': item['name'],
+                    'line2_content': line2,
+                    'has_countries': '🌍' in line2,  # Globe emoji
+                    'has_contact': ('📱' in line2 or  # Mobile emoji for Telegram/Instagram
+                                  'Mail' in line2 or  # Lucide Mail icon text
+                                  'Phone' in line2),  # Lucide Phone icon text
+                    'has_rating': '⭐' in line2 or 'Star' in line2,  # Star emoji or icon
+                    'has_separator': '•' in line2  # Bullet separator
+                }
+        
+        return {
+            'found': False,
+            'name': '',
+            'line2_content': '',
+            'has_countries': False,
+            'has_contact': False,
+            'has_rating': False,
+            'has_separator': False
+        }
 

@@ -156,6 +156,84 @@ class TestHelper:
             logger.error(f"Error deleting company {company_id}: {e}")
             return False
     
+    async def get_guide_by_id(self, guide_id: int) -> Optional[dict]:
+        """
+        Get guide information by ID.
+        
+        Args:
+            guide_id: ID of the guide
+            
+        Returns:
+            Guide data dictionary if found, None otherwise
+        """
+        try:
+            response = await self.client.get(f"/api/v1/guides/{guide_id}")
+            
+            if response.status_code == 200:
+                guide_data = response.json()
+                logger.info(f"Retrieved guide {guide_id}: {guide_data.get('name')}")
+                return guide_data
+            else:
+                logger.error(f"Failed to get guide {guide_id}: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting guide {guide_id}: {e}")
+            return None
+    
+    async def get_guides_list(self, limit: int = 50) -> Optional[list]:
+        """
+        Get list of all guides.
+        
+        Args:
+            limit: Maximum number of guides to fetch
+            
+        Returns:
+            List of guide dictionaries if successful, None otherwise
+        """
+        try:
+            response = await self.client.get("/api/v1/guides", params={"limit": limit, "offset": 0})
+            
+            if response.status_code == 200:
+                data = response.json()
+                # API может возвращать как новый формат {items: [], total: N}, так и legacy {guides: [], total: N}
+                guides = data.get("items") or data.get("guides", [])
+                logger.info(f"Retrieved {len(guides)} guides from API")
+                return guides
+            else:
+                logger.error(f"Failed to get guides list: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting guides list: {e}")
+            return None
+    
+    async def delete_guide(self, guide_id: int) -> bool:
+        """
+        Delete a guide by ID (for cleanup).
+        
+        Args:
+            guide_id: ID of the guide to delete
+            
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        try:
+            response = await self.client.delete(
+                f"/api/v1/test/guides/{guide_id}"
+            )
+            
+            if response.status_code in [200, 204]:
+                logger.info(f"Successfully deleted guide {guide_id}")
+                return True
+            else:
+                logger.error(f"Failed to delete guide {guide_id}: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error deleting guide {guide_id}: {e}")
+            return False
+    
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()

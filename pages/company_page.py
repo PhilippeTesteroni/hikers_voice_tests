@@ -32,6 +32,12 @@ class CompanyPage(BasePage):
     SUCCESS_MESSAGE = ".bg-green-100"
     ERROR_MESSAGE = ".bg-red-50"
     
+    # Duplicate company warning selectors
+    DUPLICATE_WARNING = ".bg-yellow-100"
+    DUPLICATE_MESSAGE = "text=Компания уже существует"
+    VIEW_EXISTING_COMPANY_BUTTON = "text=Перейти к существующей компании"
+    TRY_AGAIN_BUTTON = "text=Попробовать снова"
+    
     # Selectors for company details page
     COMPANY_TITLE = "h1"
     COMPANY_COUNTRY = ".flex:has(svg) span.text-lg"
@@ -245,3 +251,40 @@ class CompanyPage(BasePage):
             return True
         except:
             return False
+    
+    async def get_first_company_name(self) -> str:
+        """
+        Get the name of the first company from the companies list page.
+        
+        Returns:
+            Name of the first company, or empty string if no companies found
+        """
+        await self.wait_for_load()
+        company_card = await self.page.query_selector(self.COMPANY_CARD)
+        
+        if company_card:
+            name_elem = await company_card.query_selector("h3")
+            if name_elem:
+                return await name_elem.text_content()
+        
+        return ""
+    
+    async def wait_for_duplicate_warning(self) -> bool:
+        """
+        Wait for duplicate company warning message to appear.
+        
+        Returns:
+            True if duplicate warning appeared, False otherwise
+        """
+        try:
+            await self.page.wait_for_selector(self.DUPLICATE_WARNING, timeout=10000)
+            await self.page.wait_for_selector(self.DUPLICATE_MESSAGE, timeout=5000)
+            return True
+        except:
+            return False
+    
+    async def click_view_existing_company(self) -> None:
+        """
+        Click the 'View existing company' button on duplicate warning page.
+        """
+        await self.click_and_wait(self.VIEW_EXISTING_COMPANY_BUTTON)

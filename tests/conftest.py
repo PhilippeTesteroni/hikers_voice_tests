@@ -267,3 +267,48 @@ async def clean_test_review(backend_url: str):
         logger.info("No test reviews to clean up")
 
 
+@pytest_asyncio.fixture(scope="function")
+async def clean_test_guide(backend_url: str):
+    """
+    Fixture to track and clean up test guides created during tests.
+    
+    Usage:
+        created_guide_id = None
+        async with clean_test_guide(backend_url) as guide_ids:
+            # Create guide
+            created_guide_id = await create_guide()
+            guide_ids.append(created_guide_id)
+            # Test continues...
+        # Cleanup happens automatically
+    
+    Args:
+        backend_url: Backend API URL
+        
+    Yields:
+        List to track guide IDs for cleanup
+    """
+    from utils.test_helper import TestHelper
+    
+    test_helper = TestHelper(backend_url)
+    guide_ids = []
+    
+    yield guide_ids
+    
+    # Cleanup: Delete test guides
+    if guide_ids:
+        logger.info(f"Cleaning up {len(guide_ids)} test guides: {guide_ids}")
+        
+        for guide_id in guide_ids:
+            deleted = await test_helper.delete_guide(guide_id)
+            if not deleted:
+                pytest.fail(
+                    f"CLEANUP FAILED: Could not delete test guide {guide_id}. "
+                    f"This will cause test data accumulation!"
+                )
+        
+        await test_helper.close()
+        logger.info(f"✓ All test guides cleaned up")
+    else:
+        logger.info("No test guides to clean up")
+
+

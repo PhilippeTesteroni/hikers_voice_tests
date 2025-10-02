@@ -31,6 +31,30 @@ class GuidePage(BasePage):
     BACK_BUTTON = "a:has-text('← Назад')"
     LEAVE_REVIEW_BUTTON = "a:has-text('Оставить отзыв')"
     
+    # New guide form selectors
+    GUIDE_NAME_INPUT = "input#name"
+    GUIDE_DESCRIPTION_TEXTAREA = "textarea#description"
+    GUIDE_COUNTRIES_SELECT = "select"
+    GUIDE_EMAIL_INPUT = "input#contact_email"
+    GUIDE_PHONE_INPUT = "input#contact_phone"
+    GUIDE_INSTAGRAM_INPUT = "input#contact_instagram"
+    GUIDE_TELEGRAM_INPUT = "input#contact_telegram"
+    CREATE_GUIDE_BUTTON = "button:has-text('Создать профиль')"
+    SUCCESS_MESSAGE = ".bg-green-100"
+    
+    # Duplicate guide warning selectors
+    DUPLICATE_WARNING = ".bg-yellow-50"
+    DUPLICATE_MESSAGE = "text=Возможно, этот гид уже существует"
+    DUPLICATE_CARD = ".bg-gray-50"
+    YES_GO_TO_PROFILE_BUTTON = "text=Да, перейти к профилю"
+    NO_CREATE_NEW_BUTTON = "text=Нет, создать нового"
+    
+    # Duplicate card elements
+    DUPLICATE_GUIDE_NAME = ".bg-gray-50 h3"
+    DUPLICATE_GUIDE_COUNTRIES = ".bg-gray-50 .bg-blue-100"
+    DUPLICATE_GUIDE_RATING = ".bg-gray-50 .text-yellow-400"
+    DUPLICATE_GUIDE_CONTACTS = ".bg-gray-50 .space-y-1"
+    
     def __init__(self, page: Page, base_url: str = "http://localhost:3000"):
         """
         Initialize GuidePage.
@@ -276,3 +300,174 @@ class GuidePage(BasePage):
                         info["specialization"] = line.replace("Специализация:", "").strip()
         
         return info
+    
+    async def open_new_guide_form(self) -> None:
+        """Open the new guide creation form."""
+        url = f"{self.base_url}/guides/new"
+        await self.page.goto(url)
+        await self.wait_for_load()
+    
+    async def fill_guide_form(self, guide_data: Dict[str, Any]) -> None:
+        """
+        Fill the new guide form with provided data.
+        
+        Args:
+            guide_data: Dictionary containing guide information
+        """
+        # Fill required fields
+        if "name" in guide_data:
+            await self.fill_and_validate(self.GUIDE_NAME_INPUT, guide_data["name"])
+        
+        if "description" in guide_data:
+            await self.fill_and_validate(self.GUIDE_DESCRIPTION_TEXTAREA, guide_data["description"])
+        
+        # Fill countries (multi-select)
+        if "countries" in guide_data:
+            for country_code in guide_data["countries"]:
+                await self.page.select_option(self.GUIDE_COUNTRIES_SELECT, country_code)
+                await self.page.wait_for_timeout(300)  # Wait for UI update
+        
+        # Fill optional contact fields
+        if "email" in guide_data:
+            await self.fill_and_validate(self.GUIDE_EMAIL_INPUT, guide_data["email"])
+        
+        if "phone" in guide_data:
+            await self.fill_and_validate(self.GUIDE_PHONE_INPUT, guide_data["phone"])
+        
+        if "instagram" in guide_data:
+            await self.fill_and_validate(self.GUIDE_INSTAGRAM_INPUT, guide_data["instagram"])
+        
+        if "telegram" in guide_data:
+            await self.fill_and_validate(self.GUIDE_TELEGRAM_INPUT, guide_data["telegram"])
+    
+    async def submit_guide_form(self) -> None:
+        """Submit the guide creation form."""
+        await self.click_and_wait(self.CREATE_GUIDE_BUTTON)
+    
+    async def wait_for_duplicate_warning(self) -> bool:
+        """
+        Wait for duplicate guide warning message to appear.
+        
+        Returns:
+            True if duplicate warning appeared, False otherwise
+        """
+        try:
+            await self.page.wait_for_selector(self.DUPLICATE_WARNING, timeout=10000)
+            await self.page.wait_for_selector(self.DUPLICATE_MESSAGE, timeout=5000)
+            return True
+        except:
+            return False
+    
+    async def get_duplicate_guide_info(self) -> Dict[str, Any]:
+        """
+        Get information about the duplicate guide from the warning card.
+        
+        Returns:
+            Dictionary with duplicate guide information
+        """
+        info = {}
+        
+        # Get guide name
+        name_element = await self.page.query_selector(self.DUPLICATE_GUIDE_NAME)
+        if name_element:
+            info["name"] = await name_element.text_content()
+        
+        # Get countries
+        country_badges = await self.page.query_selector_all(self.DUPLICATE_GUIDE_COUNTRIES)
+        info["countries"] = []
+        for badge in country_badges:
+            country = await badge.text_content()
+            if country:
+                info["countries"].append(country.strip())
+        
+        # Get rating
+        rating_element = await self.page.query_selector(self.DUPLICATE_GUIDE_RATING)
+        if rating_element:
+            rating_text = await self.page.locator(".bg-gray-50").locator("text=/\\d+\\.\\d+/").first.text_content()
+            if rating_text:
+                info["rating"] = float(rating_text)
+        
+        # Get reviews count
+        reviews_element = self.page.locator(".bg-gray-50").locator("text=/\\d+ отзыв/").first
+        if await reviews_element.count() > 0:
+            reviews_text = await reviews_element.text_content()
+            import re
+            match = re.search(r'(\d+)', reviews_text)
+            if match:
+                info["reviews_count"] = int(match.group(1))
+        
+        # Get contacts
+        contacts_section = await self.page.query_selector(self.DUPLICATE_GUIDE_CONTACTS)
+        if contacts_section:
+            contacts_text = await contacts_section.text_content()
+            info["contacts"] = {}
+            
+            if "@" in contacts_text:
+                lines = contacts_text.split("\n")
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("@"):
+                        # Could be Telegram or Instagram
+                        if "telegram" in line.lower() or len(info["contacts"]) == 0:
+                            info["contacts"]["telegram"] = line
+                        else:
+                            info["contacts"]["instagram"] = line
+                    elif "+" in line or line.replace(" ", "").replace("-", "").isdigit():
+                        info["contacts"]["phone"] = line
+                    elif "@" in line and "." in line:
+                        info["contacts"]["email"] = line
+        
+        return info
+    
+    async def click_yes_go_to_profile(self) -> None:
+        """Click 'Yes, go to profile' button on duplicate warning."""
+        await self.click_and_wait(self.YES_GO_TO_PROFILE_BUTTON)
+    
+    async def check_duplicate_card_has_photo(self) -> bool:
+        """
+        Check if duplicate guide card displays a photo (not placeholder).
+        
+        Returns:
+            True if real photo is displayed
+        """
+        img_element = await self.page.query_selector(".bg-gray-50 img")
+        if img_element:
+            src = await img_element.get_attribute("src")
+            return src is not None and "placeholder" not in src
+        return False
+    
+    async def get_success_guide_id(self) -> Optional[int]:
+        """
+        Get the guide ID from the success message after creation.
+        
+        Returns:
+            Guide ID if found, None otherwise
+        """
+        try:
+            # Wait for success message
+            await self.page.wait_for_selector(self.SUCCESS_MESSAGE, timeout=5000)
+            
+            # Get ID from the success message: "ID гида: <strong>123</strong>"
+            id_element = await self.page.query_selector("p.text-sm strong")
+            if id_element:
+                id_text = await id_element.text_content()
+                guide_id = int(id_text)
+                return guide_id
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    async def wait_for_guide_success(self) -> bool:
+        """
+        Wait for guide creation success message.
+        
+        Returns:
+            True if success message appeared, False otherwise
+        """
+        try:
+            await self.page.wait_for_selector(self.SUCCESS_MESSAGE, timeout=10000)
+            return True
+        except:
+            return False
