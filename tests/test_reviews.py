@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 @pytest.mark.e2e
 @pytest.mark.critical
 @pytest.mark.parametrize("rating", [1, 5])
-async def test_create_company_review_with_autocomplete_refactored(
+async def test_create_company_review_with_autocomplete(
     page: Page,
     api_client: Dict[str, Any],
     frontend_api_client,
@@ -175,7 +175,7 @@ Rating {rating} out of 5 stars. Highly recommended!""",
 @pytest.mark.e2e
 @pytest.mark.critical
 @pytest.mark.parametrize("rating", [1, 5])
-async def test_create_guide_review_with_autocomplete_refactored(
+async def test_create_guide_review_with_autocomplete(
     page: Page,
     api_client: Dict[str, Any],
     frontend_api_client,
