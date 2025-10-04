@@ -236,13 +236,14 @@ class ReviewFormPage(BasePage):
         """
         await self.page.select_option(self.COUNTRY_SELECT, country_code)
     
-    async def fill_company_name_with_autocomplete(self, search_text: str) -> None:
+    async def fill_company_name_with_autocomplete(self, search_text: str, select_exact: str = None) -> None:
         """
         Fill company name using autocomplete dropdown.
-        Searches for company and selects first match.
+        Searches for company and selects match.
         
         Args:
-            search_text: Text to search for in company names
+            search_text: Text to TYPE in search field (first few characters)
+            select_exact: Exact full name to SELECT from dropdown (if None, selects first match)
         """
         # Clear and type search text
         company_input = self.page.locator(self.COMPANY_NAME_INPUT)
@@ -255,16 +256,27 @@ class ReviewFormPage(BasePage):
         
         dropdown_items = self.page.locator(self.COMPANY_AUTOCOMPLETE_ITEM)
         
-        # Find and click the first company with search_text in name
+        # Find and click the matching company
         found = False
         for i in range(await dropdown_items.count()):
             item_text = await dropdown_items.nth(i).text_content()
-            if search_text in item_text:
-                await dropdown_items.nth(i).click()
-                found = True
-                break
+            
+            if select_exact:
+                # Look for EXACT match (case-insensitive)
+                if item_text and select_exact.lower() in item_text.lower():
+                    self.logger.info(f"Found exact match: {item_text.strip()}")
+                    await dropdown_items.nth(i).click()
+                    found = True
+                    break
+            else:
+                # Select first item containing search_text
+                if search_text in item_text:
+                    self.logger.info(f"Found first match: {item_text.strip()}")
+                    await dropdown_items.nth(i).click()
+                    found = True
+                    break
         
-        assert found, f"No company with '{search_text}' found in autocomplete dropdown"
+        assert found, f"No company matching '{select_exact or search_text}' found in autocomplete dropdown"
         
         # IMPORTANT: Wait for frontend to process the selection
         await self.page.wait_for_timeout(1000)  # Give time for form to update with selected company ID

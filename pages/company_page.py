@@ -31,6 +31,7 @@ class CompanyPage(BasePage):
     CREATE_COMPANY_BUTTON = "button:has-text('Создать компанию')"
     SUCCESS_MESSAGE = ".bg-green-100"
     ERROR_MESSAGE = ".bg-red-50"
+    VIEW_COMPANY_BUTTON = "text=Посмотреть страницу компании"
     
     # Duplicate company warning selectors
     DUPLICATE_WARNING = ".bg-yellow-100"
@@ -192,23 +193,26 @@ class CompanyPage(BasePage):
     async def get_company_reviews_count(self) -> int:
         """Get the number of reviews from the details page."""
         try:
-            # Look for "X отзыв(ов)" text
+            # Look for "X отзыв(ов)" text in stats section
             import re
-            # Try to find in stats section first
-            reviews_element = await self.page.query_selector(".flex:has-text('Отзывы') .text-sm")
-            if reviews_element:
-                reviews_text = await reviews_element.text_content()
-                match = re.search(r'(\d+)', reviews_text)
-                if match:
-                    return int(match.group(1))
             
-            # Fallback: look anywhere in the page
+            # Try to find in stats section with "Отзывы" label
+            stats_blocks = await self.page.query_selector_all(".flex.items-center.space-x-3")
+            for block in stats_blocks:
+                text = await block.text_content()
+                if 'Отзывы' in text or 'Отзыв' in text:
+                    # Extract number from patterns like "5 отзывов" or "1 отзыв"
+                    match = re.search(r'(\d+)\s+отзыв', text)
+                    if match:
+                        return int(match.group(1))
+            
+            # Fallback: look for standalone "X отзыв" pattern in page
             page_content = await self.page.content()
             match = re.search(r'(\d+)\s+отзыв', page_content)
             if match:
                 return int(match.group(1))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Error getting reviews count: {e}")
         return 0
     
     async def get_company_rating_text(self) -> str:
@@ -300,6 +304,13 @@ class CompanyPage(BasePage):
             return True
         except:
             return False
+    
+    async def click_view_company_button(self) -> None:
+        """
+        Click the 'View company page' button after successful creation.
+        Waits for navigation to company page.
+        """
+        await self.click_and_wait(self.VIEW_COMPANY_BUTTON)
     
     async def get_first_company_name(self) -> str:
         """

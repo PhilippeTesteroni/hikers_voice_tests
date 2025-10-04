@@ -25,21 +25,28 @@ class TestHelper:
     async def find_and_moderate_review(
         self, 
         author_name: str,
-        action: str = "approve"
+        action: str = "approve",
+        company_id: Optional[int] = None,
+        guide_id: Optional[int] = None
     ) -> Optional[int]:
         """
-        Find review by author name and moderate it.
-        Single point for review moderation logic.
+        Find review by author name, then moderate it.
+        
+        IMPORTANT: Reviews are created with status 'pending_rate_limited' and WITHOUT entity linking.
+        Entity linking (company_id/guide_id assignment) happens ONLY during moderation approval.
+        Therefore, we search ONLY by author_name, not by company_id/guide_id.
         
         Args:
-            author_name: Name of the review author
+            author_name: Name of the review author (should be unique with timestamp)
             action: "approve" or "reject"
+            company_id: Optional - used ONLY for verification AFTER moderation
+            guide_id: Optional - used ONLY for verification AFTER moderation
             
         Returns:
             Review ID if found and moderated, None otherwise
         """
         try:
-            # Get all pending reviews (including rate-limited)
+            # Get all reviews
             response = await self.client.get("/api/v1/test/reviews/all")
             
             if response.status_code != 200:
@@ -49,28 +56,74 @@ class TestHelper:
             data = response.json()
             reviews = data.get("reviews", [])
             
-            # Find review by author name
+            # Find reviews by author name and pending status ONLY
+            # Do NOT filter by company_id/guide_id - they are NULL before moderation!
+            matching_reviews = []
             for review in reviews:
-                if review.get("author_name") == author_name and \
-                   review.get("status") in ["pending", "pending_rate_limited"]:
-                    review_id = review.get("id")
-                    logger.info(f"Found review ID {review_id} for author {author_name}")
-                    
-                    # Moderate the review
-                    mod_response = await self.client.post(
-                        f"/api/v1/test/moderate/{review_id}",
-                        params={"action": action}
-                    )
-                    
-                    if mod_response.status_code == 200:
-                        logger.info(f"Review {review_id} {action}d successfully")
-                        return review_id
-                    else:
-                        logger.error(f"Failed to moderate review: {mod_response.status_code}")
-                        return None
+                # Check author name matches
+                if review.get("author_name") != author_name:
+                    continue
+                
+                # Check status is pending (any variant)
+                status = review.get("status")
+                if status not in ["pending", "pending_rate_limited", "pending_moderation"]:
+                    continue
+                
+                matching_reviews.append(review)
             
-            logger.warning(f"No pending review found for author: {author_name}")
-            return None
+            if not matching_reviews:
+                logger.warning(f"No pending review found for author: {author_name}")
+                logger.warning(f"Searched statuses: pending, pending_rate_limited, pending_moderation")
+                return None
+            
+            # If multiple matches, take the one with HIGHEST ID (most recent)
+            if len(matching_reviews) > 1:
+                logger.warning(f"Found {len(matching_reviews)} matching reviews for '{author_name}', taking the most recent one")
+                matching_reviews.sort(key=lambda r: r.get("id", 0), reverse=True)
+            
+            review = matching_reviews[0]
+            review_id = review.get("id")
+            
+            # Log what we found BEFORE moderation
+            logger.info(f"Found review ID {review_id} for author '{author_name}'")
+            logger.debug(f"  Status before moderation: {review.get('status')}")
+            logger.debug(f"  company_id before moderation: {review.get('company_id')}")
+            logger.debug(f"  guide_id before moderation: {review.get('guide_id')}")
+            
+            # Moderate the review
+            mod_response = await self.client.post(
+                f"/api/v1/test/moderate/{review_id}",
+                params={"action": action}
+            )
+            
+            if mod_response.status_code == 200:
+                logger.info(f"Review {review_id} {action}d successfully")
+                
+                # Optional: Verify entity linking happened correctly AFTER moderation
+                if action == "approve" and (company_id or guide_id):
+                    # Re-fetch review to check entity linking
+                    verify_response = await self.client.get("/api/v1/test/reviews/all")
+                    if verify_response.status_code == 200:
+                        verify_data = verify_response.json()
+                        verify_reviews = verify_data.get("reviews", [])
+                        moderated_review = next((r for r in verify_reviews if r.get("id") == review_id), None)
+                        
+                        if moderated_review:
+                            linked_company = moderated_review.get("company_id")
+                            linked_guide = moderated_review.get("guide_id")
+                            
+                            if company_id and linked_company != company_id:
+                                logger.warning(f"Entity linking mismatch! Expected company_id={company_id}, got {linked_company}")
+                            if guide_id and linked_guide != guide_id:
+                                logger.warning(f"Entity linking mismatch! Expected guide_id={guide_id}, got {linked_guide}")
+                            
+                            logger.debug(f"  company_id after moderation: {linked_company}")
+                            logger.debug(f"  guide_id after moderation: {linked_guide}")
+                
+                return review_id
+            else:
+                logger.error(f"Failed to moderate review: {mod_response.status_code}")
+                return None
             
         except Exception as e:
             logger.error(f"Error finding/moderating review: {e}")
