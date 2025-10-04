@@ -250,11 +250,12 @@ async def test_review_with_photos_refactored(
         logger.info(f"Gallery has {count} photos (expecting {photo_count})")
         return count == photo_count
     
-    success = await reviews_page.wait_for_data_update(
+    success = await reviews_page.wait_for_condition(
         check_fn=check_photos_in_gallery,
         timeout=30000,
-        retry_interval=6000,
-        reload_page=True
+        interval=5000,
+        retry_with_reload=True,
+        error_message=f"Photos did not appear in gallery (expected {photo_count})"
     )
     assert success, f"Expected {photo_count} photos in gallery"
     

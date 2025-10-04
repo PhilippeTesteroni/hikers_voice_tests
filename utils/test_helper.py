@@ -322,6 +322,47 @@ class TestHelper:
             logger.error(f"Error deleting review {review_id}: {e}")
             return False
     
+    async def get_master_key(self, entity_type: str, entity_id: int) -> Optional[str]:
+        """
+        Get or generate master key for an entity via test endpoint.
+        
+        This endpoint returns existing master key or automatically generates a new one
+        if it doesn't exist (similar to Telegram bot's /generate_company_key command).
+        
+        Args:
+            entity_type: "company" or "guide"
+            entity_id: ID of the entity
+            
+        Returns:
+            Master key UUID string if successful, None otherwise
+        """
+        try:
+            response = await self.client.get(
+                f"/api/v1/test/master-key/{entity_type}/{entity_id}"
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                master_key = data.get("master_key")
+                was_generated = data.get("generated", False)
+                
+                if was_generated:
+                    logger.info(f"Generated new master key for {entity_type} #{entity_id}")
+                else:
+                    logger.info(f"Retrieved existing master key for {entity_type} #{entity_id}")
+                
+                return master_key
+            elif response.status_code == 404:
+                logger.error(f"{entity_type.capitalize()} {entity_id} not found")
+                return None
+            else:
+                logger.error(f"Failed to get master key: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting master key for {entity_type} {entity_id}: {e}")
+            return None
+    
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()

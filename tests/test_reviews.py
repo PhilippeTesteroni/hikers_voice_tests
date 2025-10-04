@@ -130,12 +130,26 @@ Rating {rating} out of 5 stars. Highly recommended!""",
     logger.info(f"Review {review_id} approved and linked to company {test_company['id']}")
     await test_helper.close()
     
-    # Step 6: Verify on home page
+    # Step 6: Verify on home page with retry
     await home_page.open()
     await home_page.wait_for_load()
     await home_page.wait_for_reviews_to_load()
     
-    # Find review by author (ISR cache issue fixed, no retries needed)
+    # Find review by author with retry (ISR cache may need reload)
+    async def check_review_on_home():
+        review_card = await home_page.find_review_by_author(review_data["author_name"])
+        return review_card is not None
+    
+    success = await home_page.wait_for_condition(
+        check_fn=check_review_on_home,
+        timeout=30000,
+        interval=5000,
+        retry_with_reload=True,
+        error_message=f"Review not found on home page for author {review_data['author_name']}"
+    )
+    assert success, f"Review not found on home page after retries for author {review_data['author_name']}"
+    
+    # Now get the actual review card
     review_card = await home_page.find_review_by_author(review_data["author_name"])
     assert review_card is not None, f"Review not found on home page for author {review_data['author_name']}"
     

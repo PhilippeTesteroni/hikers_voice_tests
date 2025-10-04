@@ -270,25 +270,41 @@ class BasePage:
         
         self.page.on("dialog", dialog_handler)
     
-    async def wait_for_data_update(
+    async def wait_for_condition(
         self,
         check_fn,
         timeout: int = 10000,
-        retry_interval: int = 2000,
-        reload_page: bool = True
+        interval: int = 500,
+        error_message: str = "Condition not met within timeout",
+        retry_with_reload: bool = False
     ) -> bool:
         """
-        Wait for data to update with retry and page reload.
-        Useful for waiting ISR cache invalidation after data mutations.
+        Wait for a condition to become true with optional page reload retries.
         
         Args:
-            check_fn: Async function that returns True if data is updated
+            check_fn: Async function that returns True when condition is met
             timeout: Total timeout in milliseconds
-            retry_interval: Interval between retries in milliseconds
-            reload_page: Whether to reload page between retries (uses hard reload to bypass cache)
+            interval: Polling interval in milliseconds
+            error_message: Error message if timeout occurs
+            retry_with_reload: If True, reload page between retries for ISR cache invalidation
             
         Returns:
-            True if data updated, False if timeout
+            True if condition met, False if timeout
+            
+        Example:
+            # Simple polling without reload
+            success = await page.wait_for_condition(
+                check_fn=lambda: page.get_reviews_count() > 0,
+                timeout=5000
+            )
+            
+            # With page reload for ISR cache
+            success = await page.wait_for_condition(
+                check_fn=lambda: page.get_reviews_count() > 0,
+                timeout=30000,
+                interval=5000,
+                retry_with_reload=True
+            )
         """
         start_time = asyncio.get_event_loop().time()
         end_time = start_time + (timeout / 1000)
@@ -297,46 +313,28 @@ class BasePage:
         while asyncio.get_event_loop().time() < end_time:
             attempt += 1
             
-            if await check_fn():
-                if attempt > 1:
-                    self.logger.info(f"Data updated after {attempt} attempts")
-                return True
+            try:
+                if await check_fn():
+                    if attempt > 1:
+                        self.logger.debug(f"Condition met after {attempt} attempts")
+                    return True
+            except Exception as e:
+                # Log check function errors but continue polling
+                self.logger.debug(f"Check function error (attempt {attempt}): {e}")
             
             remaining_time = end_time - asyncio.get_event_loop().time()
             if remaining_time <= 0:
                 break
-                
-            self.logger.info(f"Data not updated yet, retrying... (attempt {attempt})")
             
-            if reload_page:
-                # Hard reload (bypass ALL caches) - equivalent to Ctrl+Shift+R / Cmd+Shift+R
-                # This ensures we get fresh data from server, not cached version
-                try:
-                    # Use CDP to clear ALL caches (Network + Service Worker + etc)
-                    client = await self.page.context.new_cdp_session(self.page)
-                    
-                    # Clear all browser caches
-                    await client.send("Network.clearBrowserCache")
-                    await client.send("Network.clearBrowserCookies")  # Also clear cookies just in case
-                    
-                    # Disable cache for this request
-                    await client.send("Network.setCacheDisabled", {"cacheDisabled": True})
-                    
-                    # Reload page
-                    await self.page.reload(wait_until="networkidle")
-                    
-                    # Re-enable cache after reload
-                    await client.send("Network.setCacheDisabled", {"cacheDisabled": False})
-                    
-                    self.logger.info("Hard reload with full cache clear completed")
-                except Exception as e:
-                    # Fallback: regular reload if CDP fails
-                    self.logger.warning(f"CDP cache bypass failed, using regular reload: {e}")
-                    await self.page.reload(wait_until="networkidle")
-                
-                await self.page.wait_for_timeout(min(retry_interval, int(remaining_time * 1000)))
-            else:
-                await self.page.wait_for_timeout(min(retry_interval, int(remaining_time * 1000)))
+            # Reload page if requested (for ISR cache invalidation)
+            if retry_with_reload and attempt > 1:
+                self.logger.debug(f"Reloading page (attempt {attempt})")
+                await self.page.reload(wait_until="networkidle")
+                # Small delay after reload to let page settle
+                await self.page.wait_for_timeout(500)
+            
+            # Wait before next check
+            await self.page.wait_for_timeout(min(interval, int(remaining_time * 1000)))
         
-        self.logger.warning(f"Data update timeout after {attempt} attempts")
+        self.logger.warning(f"{error_message} (timeout after {attempt} attempts)")
         return False

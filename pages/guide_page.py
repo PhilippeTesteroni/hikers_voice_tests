@@ -567,3 +567,265 @@ class GuidePage(BasePage):
         close_btn = self.page.locator(self.LIGHTBOX_CLOSE_BUTTON)
         await close_btn.click()
         await self.page.wait_for_timeout(500)
+    
+    # Edit functionality selectors
+    EDIT_BUTTON = "button:has-text('Изменение данных гида')"
+    EDIT_BUTTON_SHORT = "button:has-text('Редактировать')"
+    
+    # Edit modal - Stage 1 (master key)
+    EDIT_MODAL = "div[role='dialog']"
+    MODAL_TITLE_KEY = "text=Подтверждение прав редактирования"
+    INFO_MESSAGE = ".bg-blue-50"
+    MASTER_KEY_INPUT = "input[type='text'].font-mono"
+    MASTER_KEY_ERROR = ".text-sm.text-red-600"
+    EDIT_PROCEED_BUTTON = "button[type='submit']:has-text('Редактировать')"
+    
+    # Edit modal - Stage 2 (edit form)
+    MODAL_TITLE_EDIT = "text=Изменение данных гида"
+    SAVE_BUTTON = "button:has-text('Сохранить изменения')"
+    
+    # Success/Error toasts
+    SUCCESS_TOAST = ".bg-green-50"
+    ERROR_TOAST = ".bg-red-50"
+    TOAST_TITLE = ".bg-green-50 .text-sm.font-medium, .bg-red-50 .text-sm.font-medium"  # Title inside toast
+    TOAST_TEXT = ".bg-green-50 .mt-1.text-sm, .bg-red-50 .mt-1.text-sm"  # Body text inside toast
+    TOAST_CLOSE_BUTTON = "button[aria-label='Закрыть уведомление']"
+    
+    async def click_edit_button(self) -> None:
+        """
+        Click the edit button on guide page.
+        Tries both desktop and mobile versions.
+        """
+        try:
+            # Try desktop version first
+            await self.page.click(self.EDIT_BUTTON, timeout=2000)
+        except:
+            # Fallback to mobile version
+            await self.page.click(self.EDIT_BUTTON_SHORT)
+        
+        # Wait for modal content to appear (more reliable for Headless UI modals)
+        # Headless UI Dialog doesn't become 'visible' immediately due to CSS transitions
+        await self.page.wait_for_selector(
+            "text=Подтверждение прав редактирования",
+            state="visible",
+            timeout=5000
+        )
+        await self.page.wait_for_timeout(300)
+    
+    async def is_edit_modal_open(self) -> bool:
+        """
+        Check if edit modal is currently open.
+        
+        Returns:
+            True if modal is visible
+        """
+        # Check by modal title text instead of dialog wrapper (more reliable with Headless UI)
+        title = self.page.locator("text=Подтверждение прав редактирования")
+        try:
+            return await title.is_visible()
+        except:
+            return False
+    
+    async def get_info_message_text(self) -> str:
+        """
+        Get the text from the informational message in master key step.
+        
+        Returns:
+            Info message text
+        """
+        info_elem = await self.page.query_selector(self.INFO_MESSAGE)
+        if info_elem:
+            text = await info_elem.text_content()
+            return text.strip() if text else ""
+        return ""
+    
+    async def fill_master_key(self, master_key: str) -> None:
+        """
+        Fill the master key input field.
+        
+        Args:
+            master_key: UUID master key string
+        """
+        await self.fill_and_validate(self.MASTER_KEY_INPUT, master_key)
+    
+    async def get_master_key_error(self) -> Optional[str]:
+        """
+        Get the master key validation error message if present.
+        
+        Returns:
+            Error text or None
+        """
+        error_elem = await self.page.query_selector(self.MASTER_KEY_ERROR)
+        if error_elem:
+            text = await error_elem.text_content()
+            return text.strip() if text else None
+        return None
+    
+    async def is_edit_proceed_button_enabled(self) -> bool:
+        """
+        Check if the 'Редактировать' button is enabled.
+        
+        Returns:
+            True if button is enabled
+        """
+        button = self.page.locator(self.EDIT_PROCEED_BUTTON)
+        is_disabled = await button.is_disabled()
+        return not is_disabled
+    
+    async def click_edit_proceed_button(self) -> None:
+        """
+        Click the 'Редактировать' button to proceed to edit form.
+        """
+        await self.page.click(self.EDIT_PROCEED_BUTTON)
+        # Wait for form to load
+        await self.page.wait_for_selector(self.MODAL_TITLE_EDIT, state="visible", timeout=5000)
+        await self.page.wait_for_timeout(300)
+    
+    async def fill_edit_form(self, data: Dict[str, Any]) -> None:
+        """
+        Fill the guide edit form with provided data.
+        Only fills fields that are present in data dict.
+        
+        Args:
+            data: Dictionary with fields to update (name, description, email, etc.)
+        """
+        if "name" in data:
+            name_input = self.page.locator("input[type='text']").first
+            await name_input.clear()
+            await name_input.fill(data["name"])
+        
+        if "description" in data:
+            desc_textarea = self.page.locator("textarea")
+            await desc_textarea.clear()
+            await desc_textarea.fill(data["description"])
+        
+        if "email" in data:
+            email_input = self.page.locator("input[type='email']")
+            await email_input.clear()
+            await email_input.fill(data["email"])
+        
+        if "phone" in data:
+            phone_input = self.page.locator("input[type='tel']")
+            await phone_input.clear()
+            await phone_input.fill(data["phone"])
+        
+        if "instagram" in data:
+            instagram_input = self.page.locator("input[placeholder*='@guide']").first
+            await instagram_input.clear()
+            await instagram_input.fill(data["instagram"])
+        
+        if "telegram" in data:
+            telegram_input = self.page.locator("input[placeholder*='@guide']").nth(1)
+            await telegram_input.clear()
+            await telegram_input.fill(data["telegram"])
+    
+    async def submit_edit_form(self) -> None:
+        """
+        Submit the edit form by clicking 'Сохранить изменения' button.
+        Waits for navigation or error response.
+        """
+        # Click submit button
+        await self.page.click(self.SAVE_BUTTON)
+        
+        # Wait for navigation to complete (redirect with success/error param)
+        # or for error toast to appear if validation fails
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=10000)
+        except:
+            # If networkidle timeout, wait a bit more
+            await self.page.wait_for_timeout(2000)
+    
+    async def wait_for_success_toast(self, timeout: int = 10000) -> bool:
+        """
+        Wait for success toast to appear.
+        
+        Args:
+            timeout: Timeout in milliseconds
+        
+        Returns:
+            True if toast appeared
+        """
+        try:
+            await self.page.wait_for_selector(self.SUCCESS_TOAST, state="visible", timeout=timeout)
+            return True
+        except:
+            return False
+    
+    async def wait_for_error_toast(self, timeout: int = 10000) -> bool:
+        """
+        Wait for error toast to appear.
+        
+        Args:
+            timeout: Timeout in milliseconds
+        
+        Returns:
+            True if toast appeared
+        """
+        try:
+            await self.page.wait_for_selector(self.ERROR_TOAST, state="visible", timeout=timeout)
+            return True
+        except:
+            return False
+    
+    async def get_toast_title(self) -> str:
+        """
+        Get the title text from the toast notification.
+        
+        Returns:
+            Toast title text
+        """
+        title_elem = await self.page.query_selector(self.TOAST_TITLE)
+        if title_elem:
+            text = await title_elem.text_content()
+            return text.strip() if text else ""
+        return ""
+    
+    async def get_toast_text(self) -> str:
+        """
+        Get the body text from the toast notification.
+        
+        Returns:
+            Toast body text
+        """
+        text_elem = await self.page.query_selector(self.TOAST_TEXT)
+        if text_elem:
+            text = await text_elem.text_content()
+            return text.strip() if text else ""
+        return ""
+    
+    async def close_toast(self) -> None:
+        """
+        Close the toast notification by clicking the X button.
+        """
+        try:
+            await self.page.click(self.TOAST_CLOSE_BUTTON, timeout=2000)
+            await self.page.wait_for_timeout(300)
+        except:
+            # Toast might have auto-closed
+            pass
+    
+    async def check_url_has_success_param(self, expected_value: str) -> bool:
+        """
+        Check if URL contains success parameter with expected value.
+        
+        Args:
+            expected_value: Expected value (e.g., 'guide_updated')
+        
+        Returns:
+            True if URL has correct success parameter
+        """
+        current_url = self.page.url
+        return f"success={expected_value}" in current_url
+    
+    async def check_url_has_error_param(self, expected_value: str) -> bool:
+        """
+        Check if URL contains error parameter with expected value.
+        
+        Args:
+            expected_value: Expected value (e.g., 'invalid_master_key')
+        
+        Returns:
+            True if URL has correct error parameter
+        """
+        current_url = self.page.url
+        return f"error={expected_value}" in current_url
