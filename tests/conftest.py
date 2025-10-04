@@ -55,9 +55,24 @@ async def browser(
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
+                # CRITICAL: Disable ALL caching mechanisms
+                '--disable-http-cache',              # HTTP cache
+                '--disable-cache',                   # General cache
+                '--disable-application-cache',       # Application cache
+                '--disable-offline-load-stale-cache',
+                '--disk-cache-size=0',               # No disk cache
+                '--media-cache-size=0',              # No media cache
+                # Disable Service Workers
+                '--disable-background-networking',   # Disable SW background sync
+                '--disable-sync',                    # Disable sync service
+                # Disable prefetch/preload
+                '--disable-features=NetworkPrediction',  # No DNS prefetch
+                '--dns-prefetch-disable',            # Disable DNS prefetch
+                '--disable-preconnect',              # No preconnect
             ]
         )
         print("Browser launched!")
+        logger.info("Browser launched with ALL caching mechanisms disabled")
     except Exception as e:
         print(f"ERROR launching browser: {e}")
         raise
@@ -120,6 +135,7 @@ async def page(
 ) -> AsyncGenerator[Page, None]:
     """
     Create a page for each test with viewport 1920x1080.
+    Cache is disabled globally at browser level via launch args.
     
     Args:
         browser_context: Browser context
@@ -180,6 +196,27 @@ def review_test_data() -> Dict[str, Any]:
     """
     from fixtures.test_data import get_review_test_data
     return get_review_test_data()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def frontend_api_client(backend_url: str) -> AsyncGenerator[Any, None]:
+    """
+    Create a Frontend API client for making test API calls.
+    
+    This client uses the same endpoints as the frontend (/api/v1/companies, /api/v1/guides)
+    to create test data with proper isolation.
+    
+    Args:
+        backend_url: Backend API URL
+        
+    Yields:
+        FrontendApiClient instance
+    """
+    from utils.frontend_api_client import FrontendApiClient
+    
+    client = FrontendApiClient(backend_url)
+    yield client
+    await client.close()
 
 
 # Import test images fixtures
@@ -314,5 +351,48 @@ async def clean_test_guide(backend_url: str):
         logger.info(f"✓ All test guides cleaned up")
     else:
         logger.info("No test guides to clean up")
+
+
+@pytest_asyncio.fixture(scope="function")
+async def clean_test_company(backend_url: str):
+    """
+    Fixture to track and clean up test companies created during tests.
+    Test MUST fail if cleanup fails - no fallbacks.
+    
+    Usage:
+        Add company IDs to the list during test:
+        clean_test_company.append(company_id)
+        
+        Cleanup happens automatically on teardown.
+    
+    Args:
+        backend_url: Backend API URL
+        
+    Yields:
+        List to track company IDs for cleanup
+    """
+    from utils.test_helper import TestHelper
+    
+    test_helper = TestHelper(backend_url)
+    company_ids = []
+    
+    yield company_ids
+    
+    # Cleanup: Delete test companies
+    if company_ids:
+        logger.info(f"Cleaning up {len(company_ids)} test companies: {company_ids}")
+        
+        for company_id in company_ids:
+            deleted = await test_helper.delete_company(company_id)
+            if not deleted:
+                pytest.fail(
+                    f"CLEANUP FAILED: Could not delete test company {company_id}. "
+                    f"This will cause test data accumulation!"
+                )
+        
+        await test_helper.close()
+        logger.info(f"✓ All test companies cleaned up")
+    else:
+        logger.info("No test companies to clean up")
 
 

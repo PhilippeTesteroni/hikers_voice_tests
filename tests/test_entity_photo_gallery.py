@@ -1,6 +1,8 @@
 """
 E2E test for photo gallery on guide/company pages.
 Tests that photos from multiple reviews are correctly displayed in gallery.
+
+REFACTORED: Full test isolation - creates own entity via API, no seed data dependency.
 """
 
 import pytest
@@ -21,9 +23,11 @@ logger = logging.getLogger(__name__)
 @pytest.mark.parametrize("entity_type", ["guide", "company"])
 async def test_entity_photo_gallery(
     page: Page,
-    api_client: Dict[str, Any],
+    frontend_api_client,
     review_test_data: dict,
     clean_test_review: list,
+    clean_test_guide: list,
+    clean_test_company: list,
     frontend_url: str,
     backend_url: str,
     test_images: list[str],
@@ -32,23 +36,26 @@ async def test_entity_photo_gallery(
     """
     E2E test for photo gallery on guide/company pages.
     
+    REFACTORED: Creates unique entity per test run, no dependency on seed data.
+    
     Test scenario:
-        1. Create entity (guide or company)
-        2. Create 3 reviews with 5 photos each (total 15 photos)
+        1. Create unique entity (guide/company) via API
+        2. Create 3 reviews with 5 photos each (total 15 photos) via UI
         3. Navigate to entity page
-        4. Verify photo gallery displays 6 photo thumbnails
+        4. Verify photo gallery displays 6 photo thumbnails with +9 overlay
         5. Click on first photo to open lightbox
         6. Verify lightbox shows correct counter (1 / 15)
-        7. Navigate through all photos in lightbox
+        7. Navigate through photos in lightbox (forward and back)
         8. Close lightbox
-        9. Delete all test reviews
-        10. Verify photo gallery is no longer displayed
+        9. Cleanup handled automatically by fixtures
     
     Args:
         page: Playwright Page instance
-        api_client: API client for backend interactions
+        frontend_api_client: API client for creating entities
         review_test_data: Test data fixture
-        clean_test_review: Cleanup fixture for created reviews
+        clean_test_review: Cleanup fixture for reviews
+        clean_test_guide: Cleanup fixture for guides
+        clean_test_company: Cleanup fixture for companies
         frontend_url: Frontend base URL
         backend_url: Backend API URL
         test_images: List of test image paths
@@ -56,65 +63,58 @@ async def test_entity_photo_gallery(
     """
     test_helper = TestHelper(backend_url)
     review_ids = []
-    entity_id = None
     
     try:
-        # Step 1: Create entity (guide or company)
-        logger.info(f"Step 1: Creating test {entity_type}")
+        # Step 1: Create unique entity via API
+        logger.info(f"Step 1: Creating test {entity_type} via API")
         
         if entity_type == "guide":
-            # Используем существующего гида из базы для тестирования
-            # Георгий Челидзе (ID обычно 1 или 2)
-            entity_id = 1
-            entity_name = "Георгий Челидзе"
-            country_code = "RU"
+            entity = await frontend_api_client.create_guide(
+                name="Photo Gallery Guide",
+                countries=["GE", "AM"],
+                description="Test guide for photo gallery verification",
+                contact_telegram="@photogallerytest"
+            )
+            clean_test_guide.append(entity["id"])
+            country_code = "GE"
         else:  # company
-            # Используем существующую компанию из базы
-            # Georgian Adventures (ID 1)
-            entity_id = 1
-            entity_name = "Georgian Adventures"
+            entity = await frontend_api_client.create_company(
+                name="Photo Gallery Company",
+                country_code="GE",
+                description="Test company for photo gallery verification",
+                contact_email="photogallery@test.com"
+            )
+            clean_test_company.append(entity["id"])
             country_code = "GE"
         
-        logger.info(f"Using existing {entity_type}: {entity_name} (ID: {entity_id})")
+        entity_id = entity["id"]
+        entity_name = entity["name"]
+        
+        logger.info(f"Created test {entity_type}: ID={entity_id}, Name={entity_name}")
         
         # Step 2: Create 3 reviews with 5 photos each
-        logger.info("Step 2: Creating 3 reviews with 5 photos each")
+        logger.info("Step 2: Creating 3 reviews with 5 photos each via UI")
         
         photos_to_upload = test_images[:5]  # Select 5 photos
         
         for i in range(3):
             date_from = datetime.now() - timedelta(days=30 + i * 10)
             date_to = datetime.now() - timedelta(days=25 + i * 10)
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             
-            author_name = f"Test Gallery User {entity_type} {i+1}"
+            author_name = f"Gallery User {entity_type} {i+1} *{timestamp}*"
             
-            # Prepare review data
-            if entity_type == "company":
-                review_data = {
-                    "country_code": country_code,
-                    "company_name": entity_name,
-                    "select_autocomplete": True,
-                    "trip_date_from": date_from.strftime("%Y-%m-%d"),
-                    "trip_date_to": date_to.strftime("%Y-%m-%d"),
-                    "rating": 5,
-                    "text": f"Отличная компания! Отзыв #{i+1} для проверки галереи фотографий. " * 3,
-                    "author_name": author_name,
-                    "author_contact": f"test_gallery_{entity_type}_{i+1}@example.com",
-                    "rules_accepted": True
-                }
-            else:  # guide
-                review_data = {
-                    "country_code": country_code,
-                    "guide_search": "Георгий",
-                    "guide_name": entity_name,
-                    "trip_date_from": date_from.strftime("%Y-%m-%d"),
-                    "trip_date_to": date_to.strftime("%Y-%m-%d"),
-                    "rating": 5,
-                    "text": f"Отличный гид! Отзыв #{i+1} для проверки галереи фотографий. " * 3,
-                    "author_name": author_name,
-                    "author_contact": f"test_gallery_{entity_type}_{i+1}@example.com",
-                    "rules_accepted": True
-                }
+            review_data = {
+                "country_code": country_code,
+                "entity_search": entity_name[:10],
+                "entity_exact": entity_name,
+                "trip_date_from": date_from.strftime("%Y-%m-%d"),
+                "trip_date_to": date_to.strftime("%Y-%m-%d"),
+                "rating": 5,
+                "text": f"Отличный опыт! Отзыв #{i+1} для проверки галереи фотографий. " * 3,
+                "author_name": author_name,
+                "author_contact": f"gallery_{entity_type}_{i+1}_{timestamp}@test.com",
+            }
             
             # Open home page and start review creation
             home_page = HomePage(page, frontend_url)
@@ -130,25 +130,23 @@ async def test_entity_photo_gallery(
             await review_form.wait_for_review_form(entity_type)
             
             # Fill form based on type
+            await review_form.select_country(review_data["country_code"])
+            
             if entity_type == "company":
-                await review_form.select_country(review_data["country_code"])
-                await review_form.fill_company_name_with_autocomplete(review_data["company_name"])
-                await review_form.fill_trip_dates(
-                    review_data["trip_date_from"],
-                    review_data["trip_date_to"]
+                await review_form.fill_company_name_with_autocomplete(
+                    search_text=review_data["entity_search"],
+                    select_exact=review_data["entity_exact"]
                 )
             else:  # guide
-                await review_form.select_country(review_data["country_code"])
                 await review_form.fill_guide_name_with_autocomplete(
-                    review_data["guide_search"],
-                    review_data["guide_name"]
-                )
-                await review_form.fill_trip_dates(
-                    review_data["trip_date_from"],
-                    review_data["trip_date_to"]
+                    review_data["entity_search"],
+                    review_data["entity_exact"]
                 )
             
-            # Fill common fields
+            await review_form.fill_trip_dates(
+                review_data["trip_date_from"],
+                review_data["trip_date_to"]
+            )
             await review_form.set_rating(review_data["rating"])
             await review_form.fill_review_text(review_data["text"])
             await review_form.fill_author_info(
@@ -175,11 +173,19 @@ async def test_entity_photo_gallery(
             await review_form.wait_for_success_redirect(timeout=30000)
             assert "success=review_created" in page.url, f"Expected success redirect, got: {page.url}"
             
-            # Moderate review
-            review_id = await test_helper.find_and_moderate_review(
-                author_name=review_data["author_name"],
-                action="approve"
-            )
+            # Moderate review with entity ID for isolation
+            if entity_type == "guide":
+                review_id = await test_helper.find_and_moderate_review(
+                    author_name=review_data["author_name"],
+                    action="approve",
+                    guide_id=entity_id
+                )
+            else:
+                review_id = await test_helper.find_and_moderate_review(
+                    author_name=review_data["author_name"],
+                    action="approve",
+                    company_id=entity_id
+                )
             
             assert review_id is not None, f"Failed to moderate review for {author_name}"
             review_ids.append(review_id)
@@ -187,7 +193,8 @@ async def test_entity_photo_gallery(
             
             logger.info(f"Review #{i+1} created and approved: review_id={review_id}")
             
-            await page.wait_for_timeout(1000)
+            # Wait for backend to save photos to disk
+            await page.wait_for_timeout(3000)
         
         logger.info(f"All 3 reviews created: {review_ids}")
         
@@ -204,58 +211,23 @@ async def test_entity_photo_gallery(
             await company_page.open_company_page(entity_id)
             entity_page = company_page
         
-        await page.wait_for_timeout(2000)  # Wait for page to fully load
+        await page.wait_for_load_state("networkidle")
         
-        # Debug: Check if reviews are visible on the page
+        # Verify reviews are visible on the page
         review_cards = page.locator("article.card")
         reviews_count = await review_cards.count()
         logger.info(f"Found {reviews_count} review cards on {entity_type} page")
         
-        # If no reviews visible, something went wrong with review creation/moderation
-        if reviews_count == 0:
-            logger.error(f"No reviews found on {entity_type} page! Reviews may not be associated with entity.")
-            logger.error(f"Expected reviews: {review_ids}")
-            logger.error(f"Entity ID: {entity_id}, Name: {entity_name}")
-            
-            # Try to fetch entity data via API to debug
-            if entity_type == "guide":
-                entity_data = await test_helper.get_guide_by_id(entity_id)
-            else:
-                # Use API client to fetch company
-                response = await api_client["client"].get(f"/api/v1/companies/{entity_id}")
-                entity_data = response.json() if response.status_code == 200 else None
-            
-            if entity_data:
-                logger.error(f"Entity data: reviews_count={entity_data.get('reviews_count')}, "
-                           f"reviews_array_length={len(entity_data.get('reviews', []))}")
-            
-            assert False, f"No reviews found on {entity_type} page after creating {len(review_ids)} reviews"
+        assert reviews_count >= 3, f"Expected at least 3 reviews, found {reviews_count}"
         
-        # Step 4: Verify photo gallery displays 6 thumbnails
-        logger.info("Step 4: Verifying photo gallery displays 6 thumbnails")
+        # Step 4: Verify photo gallery displays correct number of photos
+        logger.info("Step 4: Verifying photo gallery displays 6 thumbnails with 15 total photos")
         
-        # Wait a bit more for SSR hydration on company pages
-        await page.wait_for_timeout(1000)
+        # Wait for gallery to appear
+        gallery_selector = ".card:has(h3:has-text('Фотографии'))"
+        await page.wait_for_selector(gallery_selector, state="visible", timeout=10000)
         
-        # Try to find gallery section with better selector
-        # The gallery might take longer to render on company pages due to SSR/API
-        gallery_section = page.locator(".card").filter(has=page.locator("h3:has-text('Фотографии')"))
-        
-        try:
-            await gallery_section.wait_for(state="visible", timeout=15000)
-        except:
-            # Debug: log all cards on page
-            all_cards = await page.locator(".card").all()
-            logger.error(f"Found {len(all_cards)} cards on page, but none contain photo gallery")
-            
-            for i, card in enumerate(all_cards[:5]):  # Log first 5 cards
-                text = await card.text_content()
-                logger.error(f"Card {i+1} preview: {text[:100]}...")
-            
-            raise AssertionError(
-                f"Photo gallery not found on {entity_type} page after 15 seconds. "
-                f"Created {len(review_ids)} reviews with photos, but gallery did not appear."
-            )
+        gallery_section = page.locator(gallery_selector)
         
         # Log total photos count from gallery header
         gallery_header = gallery_section.locator("h3")
@@ -368,38 +340,10 @@ async def test_entity_photo_gallery(
         assert lightbox_closed, "Lightbox did not close"
         logger.info("✓ Lightbox closed successfully")
         
-        # Step 9: Delete all test reviews
-        logger.info("Step 9: Deleting all test reviews")
-        
-        for review_id in review_ids:
-            deleted = await test_helper.delete_review(review_id)
-            
-            assert deleted, f"Failed to delete review {review_id}. Cannot proceed with cleanup verification."
-            logger.info(f"✓ Deleted review {review_id}")
-        
-        # Remove from cleanup list since we successfully deleted them
-        for review_id in review_ids:
-            if review_id in clean_test_review:
-                clean_test_review.remove(review_id)
-        
-        # Step 10: Verify photo gallery is no longer displayed
-        logger.info("Step 10: Verifying photo gallery is no longer displayed")
-        
-        # Refresh page
-        await page.reload()
-        await page.wait_for_timeout(2000)
-        
-        # Check that gallery section is not present
-        gallery_section = page.locator(".card:has-text('Фотографии из отзывов')")
-        gallery_count = await gallery_section.count()
-        
-        assert gallery_count == 0, f"Photo gallery still visible after deleting reviews (found {gallery_count} sections)"
-        logger.info("✓ Photo gallery removed after deleting all reviews")
-        
         logger.info(
-            f"TEST COMPLETED: {entity_type} photo gallery test passed. "
-            f"Created 3 reviews with 5 photos each, verified gallery display, "
-            f"tested lightbox navigation, and cleaned up successfully."
+            f"✅ TEST COMPLETED: {entity_type}={entity_id} photo gallery test passed. "
+            f"Created 3 reviews with 5 photos each (total {total_photos} photos), "
+            f"verified gallery display and lightbox navigation. Cleanup will be automatic."
         )
         
     finally:

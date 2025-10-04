@@ -1,6 +1,8 @@
 """
-E2E tests for photo upload functionality in reviews.
-Tests photo upload for both company and guide reviews.
+E2E tests for photo upload functionality - REFACTORED VERSION.
+
+Tests photo upload for company and guide reviews using unique test entities.
+Full test isolation - no dependency on seed data.
 """
 
 import pytest
@@ -9,9 +11,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 from playwright.async_api import Page
 
-from pages import HomePage
-from pages import ReviewFormPage
-from pages import ReviewsPage
+from pages import HomePage, ReviewFormPage, ReviewsPage
 from utils.test_helper import TestHelper
 
 logger = logging.getLogger(__name__)
@@ -20,16 +20,19 @@ logger = logging.getLogger(__name__)
 @pytest.mark.e2e
 @pytest.mark.critical
 @pytest.mark.parametrize("review_type,photo_count", [
-    ("company", 1),  # Boundary: minimum photos (1)
-    ("company", 5),  # Boundary: maximum photos (5)
-    ("guide", 1),    # Boundary: minimum photos (1)
-    ("guide", 5),    # Boundary: maximum photos (5)
+    ("company", 1),  # Boundary: minimum photos
+    ("company", 5),  # Boundary: maximum photos
+    ("guide", 1),
+    ("guide", 5),
 ])
-async def test_review_with_photos(
+async def test_review_with_photos_refactored(
     page: Page,
     api_client: Dict[str, Any],
+    frontend_api_client,
     review_test_data: dict,
     clean_test_review: list,
+    clean_test_company: list,
+    clean_test_guide: list,
     frontend_url: str,
     backend_url: str,
     test_images: list[str],
@@ -37,111 +40,95 @@ async def test_review_with_photos(
     photo_count: int
 ):
     """
-    E2E test for creating reviews with photos (company and guide).
+    TEST-003 REFACTORED: Review with photo upload using unique test entities.
     
-    Tests boundary values:
-    - 1 photo (minimum)
-    - 5 photos (maximum)
+    Full test isolation - creates unique company/guide per test run.
+    Tests boundary values: 1 photo (min) and 5 photos (max).
     
-    Steps:
-        1. Open home page
-        2. Click 'Leave Review' button
-        3. Select review type (company or guide) in modal
-        4. Fill review form
-        5. Upload photos (1 or 5 depending on parametrization)
-        6. Verify photo previews in form
-        7. Submit form
-        8. Check redirect with success parameter
-        9. Moderate review via API
-        10. Navigate to review detail page
-        11. Verify photos are displayed in gallery
-        12. Test photo lightbox functionality
+    Verifies:
+    - Photo upload in form
+    - Photo preview display
+    - Photo gallery on review page
+    - Lightbox functionality with navigation
     
-    Args:
-        page: Playwright Page instance
-        api_client: API client for moderation
-        review_test_data: Test data fixture
-        clean_test_review: Cleanup fixture for created reviews
-        frontend_url: Frontend base URL
-        backend_url: Backend API URL
-        test_images: List of test image paths
-        review_type: Type of review ('company' or 'guide')
-        photo_count: Number of photos to upload (1 or 5)
+    Improvements over original:
+    - No dependency on seed data
+    - Creates unique entity per test
+    - Automatic cleanup of review and entity
     """
     
-    # Arrange - prepare test data based on review type
+    # Step 1: Create unique test entity via API
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    
+    if review_type == "company":
+        test_entity = await frontend_api_client.create_company(
+            name="Photo Test Company",
+            country_code="GE",
+            description=f"Testing photo upload with {photo_count} photos",
+            contact_email=f"photos{photo_count}@test.com"
+        )
+        clean_test_company.append(test_entity["id"])
+        logger.info(f"Created test company: ID={test_entity['id']}, Name={test_entity['name']}")
+    else:  # guide
+        test_entity = await frontend_api_client.create_guide(
+            name="Photo Test Guide",
+            countries=["GE", "AM"],
+            description=f"Testing photo upload with {photo_count} photos",
+            contact_telegram="@phototest"
+        )
+        clean_test_guide.append(test_entity["id"])
+        logger.info(f"Created test guide: ID={test_entity['id']}, Name={test_entity['name']}")
+    
+    # Step 2: Prepare review data
     date_from = datetime.now() - timedelta(days=20)
     date_to = datetime.now() - timedelta(days=15)
     
-    author_name = f"Test Photo User {review_type} {photo_count}p"
+    author_name = f"Photo User {review_type} {photo_count}p *{timestamp}*"
     
-    if review_type == "company":
-        review_data = {
-            "country_code": "GE",
-            "company_name": "Georgian Adventures",  # Existing company ID=1
-            "select_autocomplete": True,
-            "trip_date_from": date_from.strftime("%Y-%m-%d"),
-            "trip_date_to": date_to.strftime("%Y-%m-%d"),
-            "rating": 5,
-            "text": f"Отличная компания! Проверка загрузки {photo_count} фотографий. " * 3,
-            "author_name": author_name,
-            "author_contact": f"test_photo_{review_type}_{photo_count}@example.com",
-            "rules_accepted": True
-        }
-    else:  # guide
-        review_data = {
-            "country_code": "RU",
-            "guide_search": "Георгий",
-            "guide_name": "Георгий Челидзе",
-            "trip_date_from": date_from.strftime("%Y-%m-%d"),
-            "trip_date_to": date_to.strftime("%Y-%m-%d"),
-            "rating": 5,
-            "text": f"Отличный гид! Проверка загрузки {photo_count} фотографий. " * 3,
-            "author_name": author_name,
-            "author_contact": f"test_photo_{review_type}_{photo_count}@example.com",
-            "rules_accepted": True
-        }
+    review_data = {
+        "country_code": "GE",
+        "entity_search": test_entity["name"][:10],
+        "entity_exact": test_entity["name"],
+        "trip_date_from": date_from.strftime("%Y-%m-%d"),
+        "trip_date_to": date_to.strftime("%Y-%m-%d"),
+        "rating": 5,
+        "text": f"Отличный опыт! Проверка загрузки {photo_count} фотографий. " * 3,
+        "author_name": author_name,
+        "author_contact": f"test_photo_{review_type}_{photo_count}_{timestamp}@example.com",
+    }
     
-    # Select photos to upload
     photos_to_upload = test_images[:photo_count]
     
-    # Act - execute test
-    
-    # Step 1-2: Open home page and click 'Leave Review'
+    # Step 3: Submit review via UI
     home_page = HomePage(page, frontend_url)
     await home_page.open()
     await home_page.wait_for_load()
     await home_page.click_leave_review()
     await page.wait_for_timeout(500)
     
-    # Step 3: Select review type in modal
     review_form = ReviewFormPage(page, frontend_url)
     await review_form.wait_for_modal()
     await review_form.select_review_type_in_modal(review_type)
     await review_form.wait_for_review_form(review_type)
     
-    # Step 4: Fill review form based on type
+    # Fill form based on type
+    await review_form.select_country(review_data["country_code"])
+    
     if review_type == "company":
-        # Fill company review
-        await review_form.select_country(review_data["country_code"])
-        await review_form.fill_company_name_with_autocomplete(review_data["company_name"])
-        await review_form.fill_trip_dates(
-            review_data["trip_date_from"],
-            review_data["trip_date_to"]
+        await review_form.fill_company_name_with_autocomplete(
+            search_text=review_data["entity_search"],
+            select_exact=review_data["entity_exact"]
         )
     else:  # guide
-        # Fill guide review
-        await review_form.select_country(review_data["country_code"])
         await review_form.fill_guide_name_with_autocomplete(
-            review_data["guide_search"],
-            review_data["guide_name"]
-        )
-        await review_form.fill_trip_dates(
-            review_data["trip_date_from"],
-            review_data["trip_date_to"]
+            review_data["entity_search"],
+            review_data["entity_exact"]
         )
     
-    # Fill common fields
+    await review_form.fill_trip_dates(
+        review_data["trip_date_from"],
+        review_data["trip_date_to"]
+    )
     await review_form.set_rating(review_data["rating"])
     await review_form.fill_review_text(review_data["text"])
     await review_form.fill_author_info(
@@ -149,113 +136,172 @@ async def test_review_with_photos(
         review_data["author_contact"]
     )
     
-    # Step 5: Scroll to photos section and upload photos
+    # Step 4: Upload photos
     await review_form.scroll_to_photos_section()
     await page.wait_for_timeout(500)
     await review_form.upload_photos(photos_to_upload)
     
-    # Step 6: Verify photo previews are visible in form
+    # Verify photo previews in form
     photos_count = await review_form.get_uploaded_photos_count()
-    assert photos_count == photo_count, f"Expected {photo_count} photo previews, got {photos_count}"
+    assert photos_count == photo_count, f"Expected {photo_count} previews, got {photos_count}"
     
     previews_visible = await review_form.verify_photo_previews_visible()
-    assert previews_visible, "Not all photo previews are properly displayed"
+    assert previews_visible, "Photo previews not properly displayed"
     
-    logger.info(f"Successfully uploaded and verified {photo_count} photos in form")
+    logger.info(f"Uploaded and verified {photo_count} photos in form")
     
     # Accept rules and submit
     await review_form.accept_rules()
-    
-    # Step 7: Submit form
     await review_form.submit_form()
     
-    # Step 8: Wait for redirect with success parameter
-    # Use longer timeout for photo uploads (base64 encoding + upload takes time)
+    # Step 5: Verify redirect
     timeout = 30000 if photo_count >= 5 else 15000
     await review_form.wait_for_success_redirect(timeout=timeout)
-    assert "success=review_created" in page.url, f"Expected success redirect, got: {page.url}"
+    assert "success=review_created" in page.url
     
-    # Step 9: Moderate review via API
+    # Step 6: Moderate review
     test_helper = TestHelper(backend_url)
+    
+    # DEBUG: Check what reviews exist in DB
+    response = await test_helper.client.get("/api/v1/test/reviews/all")
+    if response.status_code == 200:
+        all_reviews = response.json().get("reviews", [])
+        logger.info(f"Total reviews in DB: {len(all_reviews)}")
+        
+        # Find our author
+        our_reviews = [r for r in all_reviews if review_data["author_name"] in r.get("author_name", "")]
+        logger.info(f"Reviews with author '{review_data['author_name']}': {len(our_reviews)}")
+        
+        for r in our_reviews:
+            logger.info(f"  Review ID={r['id']}, status={r.get('status')}, company_id={r.get('company_id')}, guide_id={r.get('guide_id')}")
+    
+    # Find and moderate review by unique author name
+    # Author name includes timestamp so it's already unique
+    logger.info(f"Searching for review with author: '{review_data['author_name']}'")
     review_id = await test_helper.find_and_moderate_review(
         author_name=review_data["author_name"],
         action="approve"
     )
-    
-    assert review_id is not None, f"Failed to find and moderate review for author {review_data['author_name']}"
+    logger.info(f"Moderation returned review_id: {review_id}")
+    assert review_id is not None, f"Failed to moderate review for {review_data['author_name']}"
     clean_test_review.append(review_id)
+    
+    # CRITICAL: Verify the moderated review is for OUR entity
+    response = await test_helper.client.get("/api/v1/test/reviews/all")
+    assert response.status_code == 200
+    all_reviews = response.json().get("reviews", [])
+    our_review = next((r for r in all_reviews if r["id"] == review_id), None)
+    
+    assert our_review is not None, f"Review {review_id} not found"
+    
+    # Debug logging
+    logger.info(f"Review {review_id} details:")
+    logger.info(f"  Author: {our_review.get('author_name')}")
+    logger.info(f"  Company ID: {our_review.get('company_id')}")
+    logger.info(f"  Guide ID: {our_review.get('guide_id')}")
+    logger.info(f"  Photos count: {len(our_review.get('photos', []))}")
+    logger.info(f"Expected {review_type} ID: {test_entity['id']}")
+    
+    # Check entity ID matches
+    if review_type == "company":
+        actual_entity_id = our_review.get("company_id")
+        assert actual_entity_id == test_entity["id"], \
+            f"Review {review_id} is for company {actual_entity_id}, expected {test_entity['id']}"
+    else:  # guide
+        actual_entity_id = our_review.get("guide_id")
+        assert actual_entity_id == test_entity["id"], \
+            f"Review {review_id} is for guide {actual_entity_id}, expected {test_entity['id']}"
+    
+    logger.info(f"✅ Verified review {review_id} is for our {review_type} {test_entity['id']}")
+    
+    # Wait for photos to be saved to disk (base64 decoding + file I/O)
+    # Each photo takes ~500-1000ms, so be generous
+    wait_time = max(10000, photo_count * 2000)  # At least 10s, or 2s per photo
+    logger.info(f"Waiting {wait_time/1000}s for {photo_count} photos to be saved...")
+    await page.wait_for_timeout(wait_time)
+    
+    # RE-CHECK: Verify photos were saved to the review
+    response = await test_helper.client.get("/api/v1/test/reviews/all")
+    all_reviews = response.json().get("reviews", [])
+    our_review = next((r for r in all_reviews if r["id"] == review_id), None)
+    actual_photos_count = len(our_review.get('photos', []))
+    logger.info(f"Review {review_id} now has {actual_photos_count} photos in DB")
+    
+    if actual_photos_count == 0:
+        logger.error(f"❌ Photos were NOT saved! Expected {photo_count}, got 0")
+        logger.error("This indicates a backend issue with photo upload processing")
+        # Don't fail the test yet - maybe photos appear later on the page
+    
     await test_helper.close()
     
-    await page.wait_for_timeout(1000)
-    
-    # Step 10: Navigate to review detail page
-    logger.info(f"Navigating to review detail page: /reviews/{review_id}")
+    # Step 7: Navigate to review detail page
     review_url = f"{frontend_url}/reviews/{review_id}"
     await page.goto(review_url)
     await page.wait_for_load_state("networkidle")
     
-    # Verify we're on the review detail page
-    assert f"/reviews/{review_id}" in page.url, f"Not on review detail page, URL: {page.url}"
-    
-    # Step 11: Verify photos are displayed in gallery
+    # Step 8: Verify photos in gallery with retry
     reviews_page = ReviewsPage(page, frontend_url)
     
+    async def check_photos_in_gallery():
+        if not await reviews_page.has_photo_gallery():
+            logger.info("Photo gallery not found yet")
+            return False
+        count = await reviews_page.get_photos_count()
+        logger.info(f"Gallery has {count} photos (expecting {photo_count})")
+        return count == photo_count
+    
+    success = await reviews_page.wait_for_data_update(
+        check_fn=check_photos_in_gallery,
+        timeout=30000,
+        retry_interval=6000,
+        reload_page=True
+    )
+    assert success, f"Expected {photo_count} photos in gallery"
+    
+    # Verify gallery details
     has_gallery = await reviews_page.has_photo_gallery()
-    assert has_gallery, "Photo gallery not found on review page"
+    assert has_gallery, "Photo gallery not found"
     
     gallery_photos_count = await reviews_page.get_photos_count()
     assert gallery_photos_count == photo_count, \
-        f"Expected {photo_count} photos in gallery, got {gallery_photos_count}"
+        f"Expected {photo_count} photos, got {gallery_photos_count}"
     
-    logger.info(f"Photo gallery contains {gallery_photos_count} photos")
-    
-    # Verify all thumbnails are visible
     all_thumbnails_visible = await reviews_page.verify_all_thumbnails_visible()
-    assert all_thumbnails_visible, "Not all photo thumbnails are properly displayed"
+    assert all_thumbnails_visible, "Not all thumbnails displayed properly"
     
-    # Step 12: Test photo lightbox functionality
-    # Open first photo in lightbox
+    logger.info(f"Photo gallery verified: {gallery_photos_count} photos")
+    
+    # Step 9: Test lightbox functionality
     await reviews_page.open_photo_lightbox(0)
     
     is_open = await reviews_page.is_lightbox_open()
     assert is_open, "Lightbox did not open"
     
-    # Verify counter shows correct values
     counter_correct = await reviews_page.verify_lightbox_counter(1, photo_count)
     assert counter_correct, f"Lightbox counter incorrect, expected '1 / {photo_count}'"
     
-    logger.info("Lightbox opened successfully with correct counter")
+    logger.info("Lightbox opened with correct counter")
     
-    # If multiple photos, test navigation
+    # Test navigation if multiple photos
     if photo_count > 1:
-        # Navigate to next photo
         await reviews_page.navigate_lightbox_next()
         await page.wait_for_timeout(500)
         
-        # Verify counter updated
         counter_correct = await reviews_page.verify_lightbox_counter(2, photo_count)
-        assert counter_correct, f"Lightbox counter incorrect after navigation, expected '2 / {photo_count}'"
+        assert counter_correct, "Counter incorrect after next"
         
-        # Navigate back
         await reviews_page.navigate_lightbox_prev()
         await page.wait_for_timeout(500)
         
-        # Verify counter back to 1
         counter_correct = await reviews_page.verify_lightbox_counter(1, photo_count)
-        assert counter_correct, f"Lightbox counter incorrect after back navigation, expected '1 / {photo_count}'"
+        assert counter_correct, "Counter incorrect after prev"
         
         logger.info("Lightbox navigation works correctly")
     
-    # Close lightbox
     await reviews_page.close_lightbox()
     
     is_closed = not await reviews_page.is_lightbox_open()
     assert is_closed, "Lightbox did not close"
     
-    logger.info("Lightbox closed successfully")
-    
-    # Test completed successfully - cleanup will happen via fixture
-    logger.info(
-        f"TEST COMPLETED: {review_type} review with {photo_count} photos, "
-        f"review_id={review_id}"
-    )
+    logger.info(f"✅ TEST-003 PASSED: {review_type} review with {photo_count} photos, "
+                f"entity={test_entity['id']}, review={review_id}")
