@@ -293,3 +293,130 @@ async def test_create_guide_review_with_autocomplete_refactored(
     assert review_found, "Review not found on guide page"
 
     logger.info(f"✅ TEST-002 PASSED: guide={test_guide['id']}, review={review_id}, rating={rating}/5")
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("review_type,entity_field_placeholder", [
+    ("company", "Начните вводить название компании"),
+    ("guide", "Начните вводить имя гида"),
+])
+async def test_review_form_validation_errors(
+        page: Page,
+        frontend_url: str,
+        review_type: str,
+        entity_field_placeholder: str
+):
+    """
+    TEST-004: Test form validation for review creation (both company and guide forms).
+
+    Tests validation errors for review forms including:
+    - Required fields validation
+    - Minimum/maximum text length
+    - Rating requirement
+    - Rules acceptance requirement
+    - Submit button state based on form completeness
+
+    Args:
+        page: Playwright Page instance
+        frontend_url: Frontend base URL
+        review_type: Type of review - 'company' or 'guide'
+        entity_field_placeholder: Placeholder text for company/guide input field
+    """
+
+    # Arrange
+    home_page = HomePage(page, frontend_url)
+    review_form = ReviewFormPage(page, frontend_url)
+
+    # Act - Navigate to review form
+    await home_page.open()
+    await home_page.wait_for_load()
+
+    # Open review form modal
+    await home_page.click_leave_review()
+    await page.wait_for_timeout(500)
+
+    # Select review type (company or guide)
+    await review_form.wait_for_modal()
+    await review_form.select_review_type_in_modal(review_type)
+
+    # Wait for form to load - different elements for company vs guide
+    if review_type == "company":
+        await page.wait_for_selector("input[placeholder*='Начните вводить название компании']", state="visible",
+                                     timeout=10000)
+    else:  # guide
+        await page.wait_for_selector("input[placeholder*='Начните вводить имя гида']", state="visible", timeout=10000)
+
+    # Test 1: Verify submit button is disabled when form is empty
+    submit_button = page.locator("button[type='submit']:has-text('Отправить отзыв')")
+    await submit_button.wait_for(state="visible")
+    is_disabled = await submit_button.is_disabled()
+    assert is_disabled, "Submit button should be disabled for empty form"
+
+    # Test 2: Test minimum text length validation
+    text_area_locator = page.locator("textarea[name='text']")
+    await text_area_locator.click()
+    await text_area_locator.fill("Короткий")  # Less than 10 characters
+    await text_area_locator.blur()  # Trigger validation
+    await page.wait_for_timeout(500)
+
+    # Check if error appears
+    text_error = page.locator(".text-red-600").filter(has_text="символ")
+    await text_error.wait_for(state="visible", timeout=2000)
+    error_text = await text_error.text_content()
+    assert "10 символов" in error_text, f"Expected min length error, got: {error_text}"
+
+    # Test 3: Test maximum text length validation
+    await text_area_locator.fill("")
+    very_long_text = "A" * 4001  # Exceeds 4000 character limit
+    await text_area_locator.fill(very_long_text)
+    await text_area_locator.blur()
+    await page.wait_for_timeout(500)
+
+    max_length_error = page.locator(".text-red-600").filter(has_text="4000")
+    await max_length_error.wait_for(state="visible", timeout=2000)
+    error_text = await max_length_error.text_content()
+    assert "4000" in error_text, f"Expected max length error, got: {error_text}"
+
+    # Test 4: Fill all required fields to enable submit button (except rules)
+    await review_form.select_country("GE")
+
+    # Fill company or guide name based on review type
+    entity_input = page.locator(f"input[placeholder*='{entity_field_placeholder}']")
+    test_entity_name = "Test Company" if review_type == "company" else "Test Guide"
+    await entity_input.fill(test_entity_name)
+
+    # Fill dates
+    past_date_from = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d")
+    past_date_to = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+    await review_form.fill_trip_dates(past_date_from, past_date_to)
+
+    # Set rating
+    await review_form.set_rating(5)
+
+    # Fill valid text
+    await text_area_locator.fill("Это нормальный текст отзыва для тестирования валидации формы")
+
+    # Check that submit button is still disabled without rules acceptance
+    await page.wait_for_timeout(500)
+    is_disabled = await submit_button.is_disabled()
+    assert is_disabled, "Submit button should be disabled without rules acceptance"
+
+    # Test 5: Accept rules - button should become enabled
+    await review_form.accept_rules()
+    await page.wait_for_timeout(500)
+
+    # Now submit button should be enabled
+    is_disabled = await submit_button.is_disabled()
+    assert not is_disabled, "Submit button should be enabled when all fields are valid"
+
+    # Test 6: Uncheck rules - button should be disabled again
+    rules_checkbox = page.locator("input[type='checkbox'][name='rules_accepted']")
+    await rules_checkbox.uncheck()
+    await page.wait_for_timeout(500)
+
+    # Button should be disabled again
+    is_disabled = await submit_button.is_disabled()
+    assert is_disabled, "Submit button should be disabled when rules not accepted"
+
+    # Test completed successfully
+    logger.info(f"TEST-004 completed for {review_type} form: All validation rules work correctly")
